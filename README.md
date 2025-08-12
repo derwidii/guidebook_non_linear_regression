@@ -42,3 +42,13 @@ quarto::quarto_render("03_chapter_2.qmd")  # single chapter
 * The LaTeX template is referenced in `_quarto.yml` and lives in `latex/`.
 * Citations use `apa.csl`; bibliography is configured via `_quarto.yml`.
 * Outputs are written to `_book/` by default.
+
+## Additional Files
+
+These additional LaTeX/style assets are included solely to render and format the thesis according to ETH/SfS requirements; they are not part of the scientific contribution:
+
+* `ETHDASA.sty`, `ETHDASA.str`, `sfs-hyper.sty`, `sfsbib.sty`, `texab.sty`
+* `ETHDAsfs.sty`, `ETHform.sty`, `ETHSfslogo.sty`, `perdata.gcm`
+
+You may replace them with equivalent templates if your institution uses a different style.
+
