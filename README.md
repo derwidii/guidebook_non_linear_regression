@@ -4,13 +4,14 @@ Comprehensive collection for rendering the Quarto book of my master’s thesis, 
 
 ## Contents
 
-* `_quarto.yml` — project configuration to render the book
-* `01_introduction` … `08_chapter_7` — chapters from introduction to conclusion
-* `appendix/` — appendix materials
-* `latex/` — LaTeX template (Seminar for Statistics)
-* `setup.R` — sourced in every document for consistent plots/theme
-* `apa.csl` — APA‑7 citation style
-* `MyThesis.Rproj` — RStudio project (R environment)
+* `_quarto.yml`: project configuration to render the book
+* `01_introduction` … `08_chapter_7`: chapters from introduction to conclusion, including notation, code, acknowledgements and index (abstract)
+* `appendix/`: appendix materials
+* `latex/`: LaTeX template (provided by the Seminar for Statistics at ETH Zürich)
+* `setup.R`: sourced in every document for consistent plots/theme
+* `apa.csl`: APA‑7 citation style
+* `MyThesis.Rproj`: RStudio project (R environment)
+* `myReferences.bib`: all references used in the thesis 
 
 ## Build
 
