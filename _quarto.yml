@@ -1,0 +1,66 @@
+project:
+  type: book
+
+book:
+  title: "Nonlinear Regression: A Practical Guide from Foundations to Applications"
+  chapters:
+    - index.qmd
+    - acknowledgements.qmd
+    - notation.qmd
+    - code.qmd
+    - 01_introduction.qmd
+    - 02_chapter1.qmd
+    - 03_chapter2.qmd
+    - 04_chapter3.qmd
+    - 05_chapter4.qmd
+    - 07_chapter6.qmd
+    - 06_chapter5.qmd
+    - 08_chapter7.qmd
+    - 99_bibliography.qmd
+  appendices:
+    - appendix_theory_3.qmd
+    - appendix_4_theory.qmd
+    - appendix_practical_3.qmd
+    - appendix_5_theory.qmd
+    - appendix_practical_5.qmd
+    - appendix_practical_7.qmd
+
+crossref:
+  chapters: true
+
+thesis:
+  type: "Master Thesis"
+  student: "Fabian Wiedemeier"
+  period: "Summer 2025"
+  mainreader: "Dr. Lukas Meier"
+  coreader: "-"
+  date: "18 August 2025"
+  dedication: "To Mathias, who unknowingly kept me from quitting."
+
+bibliography: myReferences.bib
+csl: apa.csl
+
+format:
+  pdf:
+    link-citations: true
+    link-bibliography: true
+    pdf-engine: pdflatex
+    documentclass: book
+    lof: true
+    lot: true
+    classoption: openany
+    template: "latex/my-template.tex"
+    keep-tex: true
+    include-in-header:
+      text: |
+        \let\cleardoublepage\clearpage
+        \raggedbottom
+        \usepackage{tikz}
+        \usepackage{amsmath}
+        \usepackage{forest}
+        \usepackage{placeins}
+        \theoremstyle{remark}
+        \newtheorem*{myremark}{Remark}
+        \usetikzlibrary{positioning, shapes, arrows, shadows, matrix, fit, backgrounds}
+        \DeclareUnicodeCharacter{0008}{}
+        \DeclareUnicodeCharacter{0007}{}
