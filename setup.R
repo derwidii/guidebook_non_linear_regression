@@ -68,4 +68,5 @@ theme_thesis <- function(base_size = 12, base_family = "serif", grid = "y") {
   if (grid %in% c("y","xy")) {
     t <- t + theme(panel.grid.major.y = element_line(colour = "#E6E6E6", linewidth = 0.5))
   }
-  t
+
+  }
