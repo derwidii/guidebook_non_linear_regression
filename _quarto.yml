@@ -19,8 +19,8 @@ book:
     - 99_bibliography.qmd
   appendices:
     - appendix_theory_3.qmd
-    - appendix_4_theory.qmd
     - appendix_practical_3.qmd
+    - appendix_4_theory.qmd
     - appendix_5_theory.qmd
     - appendix_practical_5.qmd
     - appendix_practical_7.qmd
@@ -64,3 +64,4 @@ format:
         \usetikzlibrary{positioning, shapes, arrows, shadows, matrix, fit, backgrounds}
         \DeclareUnicodeCharacter{0008}{}
         \DeclareUnicodeCharacter{0007}{}
+
