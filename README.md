@@ -5,7 +5,7 @@ Comprehensive collection for rendering the Quarto book of my master’s thesis, 
 ## Contents
 
 * `_quarto.yml`: project configuration to render the book
-* `01_introduction` … `08_chapter_7`: chapters from introduction to conclusion, including notation, code, acknowledgements and index (abstract)
+* `01_introduction` … `08_chapter_7` within `chapters`: chapters from introduction to conclusion, including notation, code, acknowledgements and index (abstract)
 * `appendix/`: appendix materials
 * `latex/`: LaTeX template (provided by the Seminar for Statistics at ETH Zürich)
 * `setup.R`: sourced in every document for consistent plots/theme
