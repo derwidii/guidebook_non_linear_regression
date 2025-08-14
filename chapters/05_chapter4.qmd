@@ -1,0 +1,1559 @@
+---
+title: "Model Inference"
+---
+
+```{r, echo = FALSE}
+source("setup.R")
+```
+
+Model Inference forms the cornerstone of uncertainty quantification in nonlinear regression. While previous chapters established parameter estimation (Chapter 3) and model diagnostics (Chapter 4), point estimates alone provide an incomplete picture. This chapter develops the framework for constructing confidence regions, testing hypotheses, and making predictions with quantified uncertainty.
+
+The journey from point estimates to proper inference is particularly crucial in nonlinear regression. Unlike linear models where exact distributional results provide immediate confidence intervals, nonlinear models rely on approximations whose quality varies dramatically with sample size, model complexity, and the degree of nonlinearity.
+
+```{=latex}
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Theory}
+\thispagestyle{empty}
+\vspace*{\fill}
+\begin{center}
+\Huge\bfseries Theory
+\end{center}
+\vspace*{\fill}
+
+\clearpage
+```
+
+## Overview of Inference Methods
+
+The nonlinear regression inference framework encompasses four primary areas, each addressing distinct scientific questions. When a biologist estimates enzyme kinetics parameters, they need more than point estimates. They need to know how precisely those parameters are determined. When an economist tests whether returns to scale equal unity, they require formal hypothesis tests. When a pharmacologist predicts drug response for a new patient, they must quantify both parameter uncertainty and inherent biological variability. Figure \ref{fig:inference-overview} maps these needs to statistical methods.
+
+```{=latex}
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+    scale=0.7,  % Keep your scale
+    level 1/.style={sibling distance=5.5cm, level distance=2.0cm},
+    level 2/.style={level distance=1.8cm},
+    every node/.style={
+        draw, rectangle, rounded corners=3pt,
+        minimum height=0.45cm,  % Slightly smaller height
+        inner xsep=3pt, inner ysep=1pt,  % Reduced padding
+        align=center, font=\scriptsize,  % Changed from \footnotesize to \scriptsize
+        fill=white, drop shadow
+    },
+    root/.style={
+        minimum width=2.3cm, minimum height=0.8cm,  % Slightly smaller
+        font=\footnotesize\bfseries,  % Changed from \small to \footnotesize
+        fill=gray!20, draw=gray!50, line width=1pt
+    },
+    category/.style={
+        fill=blue!15, minimum width=2.6cm,  % Slightly smaller
+        draw=blue!40, font=\scriptsize  % Explicitly set to \scriptsize
+    },
+    method/.style={
+        fill=green!15, font=\tiny,  % Changed from \scriptsize to \tiny
+        minimum width=1.8cm,  % Can be smaller now
+        draw=green!40
+    }
+]
+% Root node
+\node[root] {Model\\Inference}
+    child {
+        node[category] {Confidence\\Intervals}
+        [sibling distance=2.2cm]
+        child { node[method] {Wald} }
+        child { node[method] {Profile-t} }
+        child { node[method] {Bootstrap} }
+    }
+    child {
+        node[category] {Hypothesis\\Testing}
+        [sibling distance=2.0cm]
+        child { node[method] {LRT} }
+        child { node[method] {F-test} }
+    }
+    child {
+        node[category] {Prediction\\Intervals}
+        [sibling distance=2.0cm]
+        child { node[method] {Delta\\Method} }
+        child { node[method] {Monte\\Carlo} }
+    }
+    child {
+        node[category] {Model\\Comparison}
+        [sibling distance=2.0cm]
+        child { node[method] {Nested\\Models} }
+        child { node[method] {Info.\\Criteria} }
+    };
+\end{tikzpicture}
+\caption{Hierarchical structure of inference methods for nonlinear regression.}
+\label{fig:inference-overview}
+\end{figure}
+```
+
+**Confidence intervals** quantify parameter uncertainty through three increasingly sophisticated approaches. Wald intervals use quadratic approximation - computationally efficient but potentially inaccurate for small samples or highly nonlinear models [@obrien_silcox_2024, p. 40]. Profile-t intervals account for the actual objective function shape while incorporating finite-sample adjustments through studentization [@ritz_streibig_2008, p. 94] . Bootstrap intervals abandon distributional assumptions entirely, using resampling to approximate the sampling distribution when standard theory fails [@ritz_streibig_2008, pp. 96-97] .
+
+**Hypothesis testing** evaluates parameter restrictions that encode scientific theories. Does the Hill coefficient equal 1, indicating no cooperativity? The likelihood ratio test (LRT) compares nested models through maximized likelihoods, remaining invariant under reparameterization. This is a crucial property given nonlinear models' sensitivity to parameterization [@huet2004, pp. 110-111]. The F-test connects familiarity with ANOVA [@ritz_streibig_2008, p. 103] .
+
+**Prediction intervals** extend beyond parameter uncertainty to account for observation variability. When predicting tomorrow's enzyme activity or next year's economic output, we must capture both our uncertainty about the true relationship and the inherent randomness in individual observations. The delta method provides analytical approximations through Taylor expansion, while Monte Carlo methods simulate from the parameter distribution for more accurate intervals when nonlinearity is severe.
+
+**Model comparison** distinguishes between nested and non-nested alternatives. Should we use Gompertz or logistic growth? Nested models use formal hypothesis tests, while non-nested models employ information criteria balancing fit against complexity-preventing overfitting while identifying genuinely superior models [@ritz_streibig_2008, pp. 105-108] .
+
+## Confidence Intervals {#sec-confidence-intervals-theory}
+
+This section develops the theoretical foundation for confidence interval construction in nonlinear regression, progressing from basic definitions through coverage properties to specific methods. The journey from theory to practice reveals why different methods exist and when each excels. We examine three primary approaches: Wald, profile-t, and bootstrap, each offering different trade-offs between computational efficiency and accuracy.
+
+### Theoretical Foundation and Coverage Properties
+
+A confidence interval provides plausible parameter values based on observed data, but its interpretation in nonlinear regression differs subtly from the linear case. Unlike linear regression's exact distributional results, nonlinear models rely on asymptotic theory whose accuracy depends critically on sample size and model behavior [@seber_wild_2003, p. 191].
+
+#### Definition and Coverage
+
+For nonlinear regression with parameter vector $\boldsymbol{\beta} \in \mathcal{B} \subseteq \mathbb{R}^p$, a $(1-\alpha) \times 100\%$ confidence interval for scalar parameter $\beta_j$ is an interval $[L(\mathbf{Y}), U(\mathbf{Y})]$ satisfying [@bates_watts_1988, p. 51]:
+
+$$P_{\boldsymbol{\beta}}\bigl(L(\mathbf{Y}) \leq \beta_j \leq U(\mathbf{Y})\bigr) = 1 - \alpha$$ {#eq-ci-definition}
+
+where $P_{\boldsymbol{\beta}}$ denotes probability under true parameter $\boldsymbol{\beta}$.
+
+The crucial distinction lies in the word "asymptotic." Coverage probability equals the nominal level $(1-\alpha)$ for exact intervals, but nonlinear regression intervals are approximate. Their actual coverage depends on sample size, model complexity, and the degree of nonlinearity.
+
+#### Asymptotic Theory for Nonlinear Least Squares
+
+The mathematical foundation rests on the asymptotic normality of nonlinear least squares estimators. Under the regularity conditions from Section @sec-regularity-conditions, as sample size grows [@seber_wild_2003, p. 191; @obrien_silcox_2024, p. 9]:
+
+$$\sqrt{n}(\hat{\boldsymbol{\beta}} - \boldsymbol{\beta}_0) \xrightarrow{d} \mathcal{N}(\mathbf{0}, \sigma^2 \mathbf{V})$$ {#eq-asymptotic-normality}
+
+where $\boldsymbol{\beta}_0$ is the true value and:
+
+$$\mathbf{V} = \Bigl[\lim_{n \to \infty} \tfrac{1}{n} \sum_{i=1}^{n} \nabla f(x_i; \boldsymbol{\beta}_0) \nabla f(x_i; \boldsymbol{\beta}_0)^T\Bigr]^{-1}$$ {#eq-asymptotic-covariance}
+
+This result parallels linear regression but with a critical difference: the covariance matrix $\mathbf{V}$ depends on the derivatives of the nonlinear function $f$, making it model-specific and potentially irregular when the model is highly nonlinear [@seber_wild_2003, pp. 23-24; @obrien_silcox_2024, p. 8] .
+
+In practice, we estimate this covariance matrix by:
+
+$$\widehat{\mathrm{Cov}}(\hat{\boldsymbol{\beta}}) = \hat{\sigma}^2 [\mathbf{J}(\hat{\boldsymbol{\beta}})^T\mathbf{J}(\hat{\boldsymbol{\beta}})]^{-1}$$ {#eq-covariance-estimate}
+
+where $\mathbf{J}(\hat{\boldsymbol{\beta}})$ is the Jacobian matrix evaluated at parameter estimates and $\hat{\sigma}^2 = \mathrm{RSS}(\hat{\boldsymbol{\beta}})/(n - p)$ estimates the error variance.
+
+### Wald Confidence Intervals {#sec-wald-intervals}
+
+#### Theoretical Development
+
+Wald intervals represent the most direct extension of linear regression methodology to nonlinear models. These intervals rely on the asymptotic normality of parameter estimates. For parameter $\beta_j$:
+
+$$\frac{\hat{\beta}_j - \beta_j}{\mathrm{SE}(\hat{\beta}_j)} \xrightarrow{d} \mathcal{N}(0, 1)$$ {#eq-wald-statistic}
+
+where $\mathrm{SE}(\hat{\beta}_j)$ is the square root of the $j$-th diagonal element of $\widehat{\mathrm{Cov}}(\hat{\boldsymbol{\beta}})$.
+
+This leads to the familiar form of the $(1-\alpha) \times 100\%$ Wald confidence interval [@ritz_streibig_2008, p.99]. A detailed derivation is found in @huet2004 [pp. 32-33]:
+
+$$\hat{\beta}_j \pm z_{\alpha/2} \cdot \mathrm{SE}(\hat{\beta}_j)$$ {#eq-wald-interval}
+
+The simplicity is appealing: compute standard errors (SE) from the inverse Hessian and apply normal quantiles. However, this simplicity masks potential problems. The quadratic approximation underlying Wald intervals assumes the log-likelihood surface is well-approximated near the maximum [@obrien_silcox_2024, p. 40; @held2020, p.132] For highly nonlinear models or small samples, this approximation fails dramatically.
+
+This inadequacy of Wald intervals is especially apparent when strong correlations exist between parameters, making individual intervals potentially misleading; in such cases, bootstrap methods can provide a more robust alternative [@gebremariam2014, pp. 2, 8], or an analysis of joint confidence regions is often necessary to understand the complete uncertainty structure, as detailed in @sec-joint-confidence-regions.
+
+### Profile-t Confidence Intervals
+
+#### Theoretical Foundation
+
+Profile-t methods represent a sophisticated compromise between computational efficiency and accuracy. The key innovation combines two ideas: profiling over the actual likelihood surface (rather than assuming quadratic shape) and studentization to account for variance estimation uncertainty [@ritz_streibig_2008, p. 94; @bates_watts_1988, pp. 205-215].
+
+The profile-t statistic for parameter $\beta_j$ is:
+
+$$t_p(\beta_j) = \frac{\hat\beta_j - {\beta}_j}{\mathrm{SE}_p(\beta_j)}$$ {#eq-profile-t-statistic}
+
+where $\mathrm{SE}_p(\beta_j)$ is the standard error from the constrained fit with $\beta_j$ fixed. This differs subtly but importantly from the Wald approach. Here we recompute the standard error for each value of $\beta_j$, capturing how uncertainty changes across the parameter space.
+
+#### Distinction from Profile Likelihood and Wald Methods
+
+Understanding why profile-t intervals often outperform alternatives requires examining three key differences:
+
+1.  **Wald intervals** assume quadratic log-likelihood around the MLE, yielding symmetric intervals. This works well for linear models but fails when the likelihood surface is asymmetric or has ridges [@held2020, p. 114] .
+
+2.  **Profile likelihood intervals** use: $$W(\beta_j) = 2[\ell(\hat{\boldsymbol{\beta}}) - \ell_p(\beta_j)]$$ {#eq-profile-likelihood} compared to $\chi^2_1$ quantiles [@huet2004, pp. 73-74]. This accounts for likelihood shape but relies on asymptotic $\chi^2$ approximation, which can be poor in small samples.
+
+3.  **Profile-t intervals** compare $t_p(\beta_j)$ to $t_{n-p}$ quantiles. This crucial distinction provides:
+
+    -   Explicit accounting for variance estimation uncertainty via t-distribution
+    -   Automatic finite-sample correction through degrees of freedom adjustment
+    -   More accurate capture of local curvature in the likelihood surface
+
+The profile-t method's superiority stems from its studentization. While standard profile likelihood assumes $\sigma^2$ is known (leading to $\chi^2$ distribution), profile-t acknowledges that we estimate $\sigma^2$ from data. This additional uncertainty source is captured by the t-distribution's heavier tails, providing better small-sample coverage [@bates_watts_1988, p. 215] .
+
+R's `confint()` for `nls` objects implements profile-t by default, thus explaining its superior coverage versus manual profile likelihood intervals that use $\chi^2$ critical values. For advanced profile-likelihood methods tailored to dose-response curves, see @sec-appendix-alternative-profile.
+
+### Bootstrap Confidence Intervals {#sec-bootstrap-confidence-intervals-theory}
+
+#### Theoretical Foundation
+
+Bootstrap methods prevent the need for distributional assumptions, thereby enabling inference when standard theory proves inadequate. The residual bootstrap for nonlinear regression proceeds as follows [@bühlmann2023, pp. 42-43]:
+
+1.  Calculate residuals $\hat{r}_i = y_i - f(x_i; \hat{\boldsymbol{\beta}})$
+2.  Generate bootstrap data $y_i^* = f(x_i; \hat{\boldsymbol{\beta}}) + r_i^*$ where $r_i^*$ sampled from $\{\hat{r}_1, \ldots, \hat{r}_n\}$
+3.  Fit model to obtain $\hat{\boldsymbol{\beta}}^*$
+4.  Repeat $B$ times (typically $B \geq 999$)
+
+This algorithm treats the empirical residual distribution as a proxy for the true error distribution-a reasonable approximation when residuals are approximately exchangeable.
+
+#### Bootstrap Interval Construction
+
+Two primary methods for constructing intervals from bootstrap samples offer different theoretical properties [@bühlmann2023, p.40] :
+
+**Percentile method** uses empirical quantiles directly: $$[\hat{\beta}_j^{*(\alpha/2 \cdot B)}, \hat{\beta}_j^{*((1-\alpha/2) \cdot B)}]$$ {#eq-bootstrap-percentile}
+
+This approach is transformation-invariant: if we seek a confidence interval for $g(\beta)$, we simply apply $g$ to the bootstrap estimates before computing percentiles.
+
+**Basic bootstrap** reflects the bootstrap distribution around the point estimate: $$[2\hat{\beta}_j - \hat{\beta}_j^{*((1-\alpha/2) \cdot B)}, 2\hat{\beta}_j - \hat{\beta}_j^{*(\alpha/2 \cdot B)}]$$ {#eq-bootstrap-basic}
+
+This method maintains the shape across the parameter space.
+
+### Robust and Heteroscedasticity-Consistent Intervals
+
+Real data often violates the constant variance assumption, invalidating standard inference. This section addresses robust alternatives that maintain validity under heteroscedasticity-distinct from the robust regression methods in @sec-robust-nonlinear that handle outliers.
+
+#### Heteroscedasticity in Nonlinear Models
+
+With heteroscedastic errors $\text{Var}(\epsilon_i) = \sigma_i^2$, the asymptotic covariance becomes [@ritz_streibig_2008, p. 84; @carroll1988, pp. 209-213] :
+
+$$\mathbf{V}_{\text{HC}} = \mathbf{A}^{-1} \mathbf{B} \mathbf{A}^{-1}$$ {#eq-sandwich-form}
+
+where $\mathbf{A} = \sum_{i=1}^{n} \nabla f(x_i; \boldsymbol{\beta}) \nabla f(x_i; \boldsymbol{\beta})^T$ and $\mathbf{B} = \sum_{i=1}^{n} \sigma_i^2 \nabla f(x_i; \boldsymbol{\beta}) \nabla f(x_i; \boldsymbol{\beta})^T$.
+
+This "sandwich" form - with $\mathbf{B}$ sandwiched between $\mathbf{A}^{-1}$ terms - corrects for heteroscedasticity without requiring variance modeling.
+
+#### Sandwich Estimators
+
+Replacing the unknown $\sigma_i^2$ by squared residuals yields the **HC0** estimator:
+
+$$
+\widehat{\mathbf V}_{\text{HC0}}
+=
+[\mathbf J^\top \mathbf J]^{-1}
+\left(\sum_{i=1}^n \hat r_i^{\,2}\,\mathbf j_i \mathbf j_i^\top\right)
+[\mathbf J^\top \mathbf J]^{-1}.
+$$ {#eq-hc0-estimator}
+
+Note: No leading $n$. This follows directly from $\mathbf A, \mathbf B$ being **sums** (not averages).
+
+Finite-sample corrections improve performance [@zeileis2004, p. 4] :
+
+\- HC1: Multiplies by $n/(n-p)$ for degrees of freedom adjustment
+
+\- HC2: Divides by $(1-h_{ii})$ where $h_{ii}$ are leverage values
+
+\- HC3: Divides by $(1-h_{ii})^2$ for additional conservatism
+
+\- HC4: Uses $(1-h_{ii})^{\delta_i}$ with data-dependent $\delta_i$
+
+These corrections address the tendency of HC0 to underestimate variance in small samples, with HC3 generally recommended for nonlinear regression.
+
+## Hypothesis Testing
+
+This section addresses formal statistical tests for parameter restrictions in nonlinear models. Scientific theories often translate into parameter constraints: enzyme cooperativity implies Hill coefficient exceeds unity, constant returns to scale means elasticities sum to one, symmetric growth suggests equal inflection parameters. We examine how to test these theories rigorously.
+
+### Likelihood Ratio Test
+
+#### Theoretical Development
+
+The likelihood ratio (LR) test provides a general framework for comparing nested models. Its power lies in invariance to parameterization, which is a crucial property since nonlinear models can be parameterized many ways. The test statistic [@huet2004, pp. 110-111] :
+
+$$\Lambda = 2[\ell(\hat{\boldsymbol{\beta}}) - \ell(\hat{\boldsymbol{\beta}}_0)]$$ {#eq-lr-statistic}
+
+compares the maximized log-likelihood under the full model versus under the restriction.
+
+For nonlinear least squares with normal errors, this simplifies to [@ritz_streibig_2008, p. 64] :
+
+$$\Lambda = n \log\left(\frac{\text{RSS}(\hat{\boldsymbol{\beta}}_0)}{\text{RSS}(\hat{\boldsymbol{\beta}})}\right)$$ {#eq-lr-rss}
+
+Under regularity conditions and the null hypothesis, $\Lambda \xrightarrow{d} \chi^2_q$ where $q$ is the number of restrictions.
+
+#### Advantages Over Wald Test
+
+The LR test exhibits several theoretical advantages [@held2020, pp. 110, 135] :
+
+1.  **Invariance**: Testing $\beta = 0$ versus $\exp(\phi) = 1$ yields identical results
+2.  **Power**: Generally higher power for nonlinear hypotheses
+3.  **Finite-sample behavior**: Better approximation to nominal size
+
+These advantages stem from using the actual likelihood shape rather than local quadratic approximation.
+
+### F-Test for Nested Models
+
+While the LR test is asymptotically valid, the extra–sum-of–squares F-test provides a convenient, approximately F-distributed statistic under normal errors. The F-statistic [@ritz_streibig_2008, p. 63] :
+
+$$F = \frac{(\text{RSS}_1 - \text{RSS}_2)/(p_2 - p_1)}{\text{RSS}_2/(n - p_2)}$$ {#eq-f-statistic}
+
+compares the increase in RSS from imposing restrictions (model 1) against the residual variance of the full model (model 2).
+
+#### Relationship to Likelihood Ratio Test
+
+For models with normal errors, a fascinating and exact connection emerges between the F-statistic and the LR. While the LR test relies on asymptotic theory, this relationship grounds the F-test in likelihood principles while providing exact inference for any sample size.
+
+As shown in @seber2003 [pp. 100-102], the F-statistic can be written directly in terms of the LR, $\Lambda$:
+
+$$ F = \frac{n-p_2}{p_2-p_1} (\Lambda^{-2/n} - 1) $$
+
+In this precise formulation:
+
+-   $n$ is the number of observations.
+-   $p_1$ and $p_2$ are the number of parameters in the nested and full models, respectively.
+-   $\Lambda$ is the **likelihood ratio**, defined as the ratio of the maximized likelihood under the restricted model ($L_1$) to that of the full model ($L_2$), i.e., $\Lambda = L_1/L_2$.
+
+This equation uses the likelihood ratio $\Lambda$ itself. We can make the connection to the more familiar likelihood ratio *test statistic* (let us call it $\Lambda_{stat} = -2 \log \Lambda$) more explicit. Since $\Lambda = \exp(-\Lambda_{stat}/2)$, we can substitute this into the equation:
+
+$$ F = \frac{n-p_2}{p_2-p_1} \left( \left( \exp\left(-\frac{\Lambda_{stat}}{2}\right) \right)^{-2/n} - 1 \right) $$
+
+This simplifies to a direct relationship between the F-statistic and the LR test statistic:
+
+$$ F = \frac{n-p_2}{p_2-p_1} \left( \exp\left(\frac{\Lambda_{stat}}{n}\right) - 1 \right) $$
+
+This form elegantly shows that as the sample size $n \to \infty$, the term $(p_2-p_1)F$ converges in distribution to $\Lambda_{stat}$, which itself follows a $\chi^2_{p_2-p_1}$ distribution. This confirms that the F-test is asymptotically equivalent to the LR test while offering superior small-sample performance under the assumption of normality.
+
+## Prediction Intervals
+
+Parameter estimation tells us about the underlying relationship; prediction intervals tell us where future observations will fall. This distinction has profound implications for decision-making. A precisely estimated dose-response curve might still yield highly variable patient responses.
+
+### Conceptual Distinction from Confidence Intervals
+
+Confidence intervals quantify uncertainty in the mean response, or the regression surface, $\mathbb{E}[Y|\mathbf{x}_0] = \mathbf{x}'_0\boldsymbol{\beta}$. As we collect more data, these intervals shrink toward zero width.
+
+Prediction intervals additionally account for observation variability. For a new observation $Y_0$ at a given value $\mathbf{x}_0$:
+
+$$Y_0 = f(\mathbf{x_0; \beta)} + \epsilon_0$$
+
+Even with perfect parameter knowledge, the error term $\epsilon_0 \sim \mathcal{N}(0, \sigma^2)$ introduces irreducible uncertainty [@seber2003, p. 131].
+
+Accurately quantifying a prediction interval requires combining this observation variability with the uncertainty from parameter estimation. The formal framework for this variance decomposition, along with detailed construction methods, is presented in @sec-prediction-interval-details.
+
+## Model Comparison and Nested Models {#sec-model-comparison-theory}
+
+Real-world modeling rarely involves a single candidate model. Should we use three or four parameters? Michaelis-Menten or Hill kinetics?
+
+### Theoretical Framework for Model Nesting
+
+#### Definition of Nested Models
+
+Model $\mathcal{M}_1$ is nested within $\mathcal{M}_2$ if $\mathcal{M}_1$ emerges from $\mathcal{M}_2$ through parameter restrictions. Common examples:
+
+-   **Parameter restriction**: Setting $\beta_j = 0$ (e.g., removing an interaction term)
+-   **Equality constraints**: Forcing $\beta_i = \beta_j$ (e.g., symmetric growth)
+-   **Functional restrictions**: $g(\boldsymbol{\beta}) = 0$ (e.g., constant returns to scale)
+
+The nesting relationship enables formal hypothesis testing insofar as we can test whether the restrictions significantly worsen fit.
+
+### Testing Nested Models
+
+Both F-tests and LRT evaluate nested models, with different strengths @ritz_streibig_2008 [p. 104]:
+
+**F-Test**: Exact under normality, intuitive ANOVA connection, implemented in base R
+
+**LR Test**: Asymptotically valid, invariant to parameterization, extends to non-normal errors
+
+The choice often depends on sample size and distributional assumptions.
+
+### Information Criteria for Non-Nested Models
+
+When models are not nested, e.g. Gompertz versus logistic growth, hypothesis tests do not apply. Information criteria balance fit against complexity.
+
+The full Akaike's Information Criterion (AIC), derived under the assumption of normally distributed errors, includes constants related to the likelihood function [@ritz_streibig_2008, p. 105]:
+
+$$\text{AIC} = n \log(2\pi) + n \log(\text{RSS}/n) + n + 2(p+1)$$ {#eq-aic}
+
+A related metric is the Bayesian Information Criterion (BIC). A detailed derivation shows that BIC can be approximated by a more complete formula that includes terms often dropped in its common representation [@burnham2010, p. 295] :
+
+$$\text{BIC} \approx -2 \log(L) + K \log(n) - K \log(2\pi) - \log(|\mathbf{V}_1(\hat{\beta})^{-1}|)$$ {#eq-bic}
+
+In these formulas, $L$ is the maximized value of the likelihood function, $n$ is the sample size, and $K$ represents the total number of estimable parameters. For AIC in a standard regression context, $K=p+1$ to account for the $p$ model coefficients and the estimated error variance.
+
+The more complete BIC formula arises from a large-sample approximation of the marginal probability of the data. As @burnham2010 [p. 295] note, the final two terms ($- K \log(2\pi) - \log(|\mathbf{V}_1(\hat{\beta})^{-1}|)$) are typically dropped because they are asymptotically dominated by the other terms. This simplification leads to the commonly used form, $\text{BIC} = -2 \log(L) + K \log(n)$. For least squares models, this is often written as $\text{BIC} = n\log(\text{RSS}/n) + K\log(n)$.
+
+AIC targets prediction error minimization, while BIC provides consistent model selection as $n \to \infty$. The penalty terms ($2K$ for AIC, and the dominant $K\log(n)$ for BIC) prevent overfitting by favoring simpler models.
+
+### Interpretation and Use {#sec-interpretation-aic}
+
+Lower values indicate better models, but differences matter more than absolute values, according to @burnham2010 [pp. 70-71]:
+
+\- $\Delta\text{AIC} < 2$: Models essentially equivalent
+
+\- $\Delta\text{AIC} \in [4,7]$: Some evidence for the better model\
+- $\Delta\text{AIC} > 10$: Strong evidence
+
+BIC's heavier penalty ($\log(n) > 2$ for $n > 7$) favors simpler models, often selecting more parsimonious representations.
+
+```{=latex}
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Practical Implementation}
+\thispagestyle{empty}
+\vspace*{\fill}
+\begin{center}
+\Huge\bfseries Practical Implementation
+\end{center}
+\vspace*{\fill}
+
+\clearpage
+```
+
+## Confidence Intervals
+
+This section demonstrates practical implementation of confidence interval methods developed in the theoretical sections. We progress from basic Wald intervals through more sophisticated profile-t and bootstrap approaches, illustrating each with the Michaelis-Menten model from Chapter 3. Through extensive simulation studies, we will discover which methods deliver on their theoretical promises and which fall short in finite samples.
+
+### Implementation of Wald Confidence Intervals
+
+We begin with Wald intervals as the workhorse of statistical inference due to their computational simplicity. Using the Michaelis-Menten model, we will see both their appeal and limitations.
+
+```{r, message=FALSE, warning=FALSE}
+# generate data
+set.seed(123)
+n <- 50
+x <- runif(n, 0.1, 10)
+beta_true <- c(Vmax = 2, Km = 1.5)
+y <- beta_true["Vmax"] * x / (beta_true["Km"] + x) + rnorm(n, 0, 0.1)
+dat <- data.frame(x = x, y = y)
+
+# fit model with easy starting values
+fit <- nls(y ~ Vmax * x / (Km + x),
+           data  = dat,
+           start = list(Vmax = 1, Km = 1))
+
+# coefs
+beta_hat <- coef(fit)
+vcov_mat <- vcov(fit)
+se <- sqrt(diag(vcov_mat))
+
+# calculate wald using manual computation
+alpha <- 0.05
+z_crit <- qnorm(1 - alpha/2)
+wald_ci <- cbind(
+  lower = beta_hat - z_crit * se,
+  estimate = beta_hat,
+  upper = beta_hat + z_crit * se
+)
+print(wald_ci)
+```
+
+The $V_{max}$ interval \[1.9536, 2.1300\] captures the true value 2 with a narrow width of 0.176, while the $K_m$ interval \[1.3332, 1.8731\] covers the true value 1.5 with greater uncertainty (width 0.540). This 3-fold difference in relative precision reflects a fundamental property of the Michaelis-Menten model: the maximum velocity is well-determined by high-concentration data, while the half-saturation constant depends critically on the transition region where data are often sparse [@motulsky2004, p. 217].
+
+The `confint2()` function from the package `nlstools` provides us with option of directly computing Wald intervals without profiling, with the subtle difference that it uses the t-distribution for its critical values to provide a more robust finite-sample correction:
+
+```{r, message=FALSE, warning=FALSE}
+library(nlstools)
+confint2(fit)
+```
+The `nlstools` package further enhances our analysis with specialized functions:
+
+```{r, message=FALSE, warning=FALSE}
+overview(fit)
+```
+
+The output gives us a comprehensive diagnostic of the model. The `Parameters` section shows the final estimates for our coefficients: $V_{max} \approx 2.04$ and $K_m \approx 1.60$. The extremely small p-values (`Pr(>|t|)`) confirm that both parameters are highly significant and essential to the model. The overall goodness-of-fit is quantified by the `Residual standard error` (0.094), which measures the typical deviation of the observed data from the fitted curve. The output also confirms the model converged successfully in just 4 iterations. Finally, the `t-based confidence interval`, equal to the intervals given by `confint2`, section provides a 95% confidence range for our estimates, suggesting the true value for $V_{max}$ lies between 1.95 and 2.13, and for $K_m$ between 1.33 and 1.88.
+
+Beyond these individual metrics, the correlation matrix reveals another crucial insight: $V_{max}$ and $K_m$ show strong positive correlation (0.913). This near-collinearity means uncertainty in one parameter propagates to the other. If we underestimate $K_m$, we will likely underestimate $V_{max}$ as well. Such correlations, common in nonlinear models, make joint confidence regions essential for a complete understanding of parameter uncertainty.
+
+For joint confidence regions, `nlsConfRegions()` implements Beale's method:
+
+```{r beale-regions, message=FALSE, warning=FALSE, results = "hide", fig.cap="Beale's 95% confidence regions showing parameter correlations.", echo=TRUE}
+regions <- nlsConfRegions(fit, length = 2000, exp = 2)  
+plot(regions, bounds = TRUE)  
+```
+
+The tilted elliptical region confirms strong parameter correlation. The red rectangle (naive ±2SE bounds) substantially overestimates uncertainty by ignoring this correlation. Black points satisfying Beale's criterion reveal the actual nonlinear confidence region-narrower than rectangular bounds suggest but potentially non-elliptical for highly nonlinear models [@baty_etal_2015, p. 14].
+
+### Profile-t Confidence Intervals
+
+While Wald intervals assume quadratic log-likelihood surfaces, real nonlinear models often exhibit asymmetric, ridge-like, or even banana-shaped likelihood contours [@bolker2013, p. 507]. Profile-t methods navigate these complex surfaces directly.
+
+```{r profile-nls, fig.cap="Profile-t traces showing signed root-t statistics versus parameter values", echo=TRUE, message=FALSE, warning=FALSE}
+# built in stats function
+pf <- stats::profile(fit)
+
+ci <- confint(pf)
+print(ci)
+```
+
+Profile-t intervals show subtle but important differences from Wald intervals. For $V_{max}$: \[1.9557, 2.1369\] versus Wald's \[1.9536, 2.1300\], and for $K_m$: \[1.3461, 1.9010\] versus \[1.3332, 1.8731\]. The profile-t intervals are slightly wider and asymmetric, capturing the true least-squares surface curvature that Wald's quadratic approximation misses.
+
+To understand why profile-t outperforms Wald, we visualize the profile traces using the package `sfsmisc` [@maechler_r_2025, p. 63]:
+
+```{r profile-traces-vis, message=FALSE, warning=FALSE, fig.cap="Profile traces revealing parameter-specific likelihood surface curvature"}
+library(sfsmisc)
+p.profileTraces(pf)
+```
+
+The traces reveal the actual likelihood surface shape. Perfect quadratic surfaces would yield straight lines; the slightly visible curvature indicates departures from Wald assumptions. Where traces cross the horizontal dashed lines (±1.96 for 95% confidence) determines the confidence limits. The asymmetry-particularly visible for $K_m$-explains why symmetric Wald intervals can mislead.
+
+#### When Profile-t Matters: Strong Nonlinearity
+
+Conventional Wald confidence intervals-obtained from a local quadratic approximation to the residual sum-of-squares surface and the asymptotic normality of the estimator are computationally convenient but often exhibit poor coverage and misleading symmetry in nonlinear settings. To illustrate the advantages of a more reliable alternative, the profile-t interval, we revisit the Michaelis–Menten model.
+
+We intentionally construct a challenging design by sampling only along the ascending limb of the curve and omitting observations near the plateau where the maximum velocity $V_{\max}$ is typically identified. Under such designs, $V_{\max}$ and $K_m$ become weakly identifiable and strongly confounded: a low-$V_{\max}$/low-$K_m$ configuration can closely mimic a high-$V_{\max}$/high-$K_m$ configuration over the sampled range. This induces high parameter correlation and pronounced intrinsic nonlinearity, yielding asymmetric and non-Gaussian uncertainty. In these conditions, profile-t intervals-constructed by profiling the parameter of interest while re-optimizing nuisance parameters-provide markedly more trustworthy inference than Wald intervals.
+
+```{r strong-nonlinearity-moderated, message=FALSE, warning=FALSE, fig.cap="Profile traces for a Michaelis-Menten fit with high parameter correlation"}
+library(nlstools)
+library(sfsmisc)
+
+# generate data
+set.seed(2025) 
+true_Vmax <- 100
+true_Km <- 20
+
+# n is smaller (6) and all x-values are <= Km
+x_mm <- c(2, 5, 8, 12, 16, 20)
+n <- length(x_mm)
+noise_sd <- 8
+y_mm <- (true_Vmax * x_mm) / (true_Km + x_mm) + rnorm(n, mean = 0, sd = noise_sd)
+df_mm <- data.frame(x = x_mm, y = y_mm)
+control_settings <- nls.control(maxiter = 1000, warnOnly = TRUE)
+
+# fit model
+fit_mm <- nls(y ~ Vmax * x / (Km + x),
+              data = df_mm,
+              start = list(Vmax = 90, Km = 15),
+              control = control_settings)
+
+# plot the profile traces
+pf_mm <- profile(fit_mm)
+p.profileTraces(pf_mm)
+```
+
+The profile traces for the Michaelis-Menten fit show dramatic curvature, confirming the model's extreme statistical nonlinearity. This results in highly asymmetric confidence intervals, rendering standard symmetric Wald intervals unreliable.
+
+-   The profile for parameter $V_{max}$ exhibits a strong right skew, with the upper confidence limit being much further from the best-fit estimate than the lower limit.
+-   The profile for parameter $K_m$ shows a similar right skew.
+
+This asymmetry is a direct consequence of the strong positive correlation between the parameters, which arises when the data does not clearly define the asymptote. In this situation, underestimating $V_{max}$ can be partially compensated by also underestimating $K_m$ to produce a similar curve on the initial rise, and vice versa.
+
+```{r, message=FALSE, warning=FALSE}
+confint2(fit_mm)# wald intervals
+confint(fit_mm) # profile-t intervals
+```
+
+The most immediate and telling result is the failure of the Wald method for the $K_m$ parameter. It produces a 95% confidence interval of `[-1.08, 21.95]`. Since $K_m$ represents a substrate concentration, it is physically impossible for it to be negative. This nonsensical lower bound is a definitive sign that the simple, symmetric assumptions of the Wald method are invalid for this dataset.
+
+In contrast, the Profile-t method correctly handles the model's nonlinearity and produces a physically meaningful interval for $K_m$ of `[4.40, 37.57]`.
+
+Beyond this critical failure, the analysis shows two further points:
+
+1.  **Significant Underestimation of Uncertainty:** The Wald intervals give a false sense of precision. For both $V_{max}$ and $K_m$, the more reliable Profile-t intervals are much wider, revealing a much larger degree of uncertainty that the Wald method misses.
+
+2.  **Asymmetry is Key:** The upward shift and wider range of the Profile-t intervals correctly capture the skewed nature of the uncertainty. A researcher might be tempted to simply truncate the negative Wald bound at zero, but this would still fail to represent the true, much higher upper limit of uncertainty for $K_m$ (37.6 vs 22.0).
+
+### Bootstrap Confidence Intervals
+
+Bootstrap methods liberate us from distributional assumptions, using computational power to approximate sampling distributions empirically. The `nlstools` package implements residual bootstrap specifically for nonlinear models:
+
+```{r bootstrap-nlstools, echo=TRUE, message=FALSE, warning=FALSE}
+library(nlstools)
+
+df <- data.frame(x = x, y = y)
+
+# refit with data frame for nlstools
+fit <- nls(
+  y    ~ Vmax * x / (Km + x),
+  data = df,
+  start = list(Vmax = 1, Km = 1)
+)
+
+# bootstrap
+set.seed(42)
+boot_nls <- nlsBoot(fit, niter = 999)
+
+summary(boot_nls)
+```
+
+Bootstrap standard errors (0.0443 for $V_{max}$, 0.1393 for $K_m$) closely match the model-based estimates, validating our distributional assumptions. The percentile confidence intervals use the 2.5% and 97.5% quantiles of the bootstrap distribution:
+
+```{r boot-viz, fig.cap="Bootstrap distributions revealing parameter uncertainty and slight asymmetry", echo=FALSE, message=FALSE, warning=FALSE}
+plot(boot_nls, type = "boxplot")
+```
+
+The bootstrap distributions reveal subtle features invisible to Wald methods: (1) Slight right-skewness in both parameters (2) Greater variability in $K_m$ relative to its estimate (3) No extreme outliers, confirming model stability
+
+These 999 bootstrap samples required 999 model fits-computationally intensive but revealing. The trade-off between computational cost and inferential accuracy often favors bootstrap methods when stakes are high.
+
+### Comparative Analysis of Confidence Interval Methods
+
+Having implemented three distinct approaches to confidence interval construction, namely Wald, profile-t, and bootstrap, we now synthesize our findings through direct comparison. All methods were applied to the same Michaelis-Menten model fit, revealing how different theoretical assumptions translate into practical differences.
+
+```{r ci-comparison-table, message=FALSE, warning=FALSE, echo = FALSE}
+# Extract confidence intervals from previously computed objects
+# Wald CI (already computed as wald_ci)
+wald_vmax_lower <- wald_ci["Vmax", "lower"]
+wald_vmax_upper <- wald_ci["Vmax", "upper"]
+wald_km_lower <- wald_ci["Km", "lower"]
+wald_km_upper <- wald_ci["Km", "upper"]
+
+# Profile-t CI (from ci object)
+profile_vmax_lower <- ci["Vmax", 1]
+profile_vmax_upper <- ci["Vmax", 2]
+profile_km_lower <- ci["Km", 1]
+profile_km_upper <- ci["Km", 2]
+
+# Bootstrap CI (from boot_nls directly)
+boot_vmax_lower <- boot_nls$bootCI["Vmax", "2.5%"]
+boot_vmax_upper <- boot_nls$bootCI["Vmax", "97.5%"]
+boot_km_lower <- boot_nls$bootCI["Km", "2.5%"]
+boot_km_upper <- boot_nls$bootCI["Km", "97.5%"]
+
+# Construct comparison table
+ci_comparison <- data.frame(
+  Parameter = c("$V_{max}$", "$K_m$"),
+  Wald = c(sprintf("[%.4f, %.4f]", wald_vmax_lower, wald_vmax_upper),
+           sprintf("[%.4f, %.4f]", wald_km_lower, wald_km_upper)),
+  Profile_t = c(sprintf("[%.4f, %.4f]", profile_vmax_lower, profile_vmax_upper),
+                sprintf("[%.4f, %.4f]", profile_km_lower, profile_km_upper)),
+  Bootstrap = c(sprintf("[%.4f, %.4f]", boot_vmax_lower, boot_vmax_upper),
+                sprintf("[%.4f, %.4f]", boot_km_lower, boot_km_upper))
+)
+
+# Calculate widths
+width_comparison <- data.frame(
+  Parameter = c("$V_{max}$", "$K_m$"),
+  Wald = c(wald_vmax_upper - wald_vmax_lower, 
+           wald_km_upper - wald_km_lower),
+  Profile_t = c(profile_vmax_upper - profile_vmax_lower, 
+                profile_km_upper - profile_km_lower),
+  Bootstrap = c(boot_vmax_upper - boot_vmax_lower, 
+                boot_km_upper - boot_km_lower)
+)
+
+# Display interval overview
+library(knitr)
+kable(ci_comparison, 
+      caption = "95% confidence intervals for Michaelis-Menten parameters",
+      col.names = c("Parameter", "Wald", "Profile-t", "Bootstrap"),
+      align = c("l", "c", "c", "c"))
+
+# Display width comparison
+kable(width_comparison, 
+      digits = 4,
+      caption = "Confidence interval widths by method",
+      col.names = c("Parameter", "Wald", "Profile-t", "Bootstrap"),
+      align = c("l", "c", "c", "c"))
+```
+
+The width comparison reveals remarkable consistency across methods. For $V_{max}$, all three approaches yield nearly identical interval widths (0.172-0.181). Similarly for $K_m$, the widths cluster tightly (0.540-0.568). These minimal differences confirm that for well-behaved models with adequate data, the choice of confidence interval method has limited practical impact. The slight variations-profile-t being marginally wider than Wald, bootstrap showing parameter-dependent behavior-represent second-order effects rather than fundamental disagreements about parameter uncertainty. This convergence validates the asymptotic theory underlying all three methods: as sample size increases and models approach linearity, different approaches to interval construction yield equivalent results.
+
+### Coverage Study {#sec-coverage-study}
+
+Theoretical coverage properties assume infinite samples. But researchers work with finite data. How well do different confidence interval methods perform with realistic sample sizes? We investigate this through extensive simulation.
+
+#### Study Design
+
+Our coverage study spans the same four nonlinear models of increasing complexity as used in @sec-comparative-evaluation for the starting value and optimization algorithm analyis:
+
+1.  **Michaelis-Menten** (2 parameters): $y = \frac{V_{max} \cdot x}{K_m + x}$
+2.  **Exponential** (2 parameters): $y = y_0 \cdot e^{r \cdot x}$
+3.  **Gompertz** (3 parameters): $$y = Asym \cdot \exp(-b2 \cdot b3^x))$$
+4.  **4-Parameter Logistic** (4 parameters): $y = d + \frac{a-d}{1 + (x/c)^b}$
+
+For each model, we generate 100 datasets at sample sizes $n \in \{5, 10, 20, 50, 75, 100\}$, then add Gaussian noise with $\sigma = 0.25$, compute 95% confidence intervals using each method, record whether true parameters fall within intervals and lastly calculate empirical coverage as proportion captured.
+
+This design tests the boundaries of each method-from tiny samples (n=5) where asymptotic theory fails dramatically, to moderate samples (n=100) where methods should converge.
+
+#### Wald Confidence Intervals
+
+Wald intervals assume asymptotic normality (@eq-wald-statistic). Implementation details are found in @sec-appendix-coverage-rate-wald.
+
+The Wald coverage simulation evaluates empirical coverage rates across sample sizes and models. Key implementation details:
+
+-   **Manual Wald CIs** computed via standard errors from the variance-covariance matrix
+-   **Robust error handling** with `try()` to skip non-convergent fits
+-   **Good starting values** close to true parameters ensure high convergence rates
+-   **Multiple sample sizes** from extreme small ($n=5$) to moderate ($n=100$)
+-   **High replication** with 100 simulated datasets per configuration
+
+Coverage proportions computed only from successful fits using `na.rm = TRUE`.
+
+```{r wald-simulation, echo=FALSE, label=fig-wald-coverage, warning=FALSE, message=FALSE, fig.cap="Coverage rates of Wald confidence intervals across models and sample sizes."}
+# Load required packages
+library(stats)
+library(drc)
+library(ggplot2)
+
+# Set simulation parameters
+set.seed(2025)
+nsim   <- 100
+sigma  <- 0.25
+sizes  <- c(5, 10, 20, 50, 75, 100)
+
+# Initialize results storage
+results <- data.frame(
+  model     = character(),
+  parameter = character(),
+  n         = integer(),
+  coverage  = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Simulation for Wald intervals
+for (n in sizes) {
+  # Michaelis-Menten model
+  true_mm   <- c(Vmax = 2.0, Km = 1.5)
+  cov_mm    <- matrix(FALSE, nsim, length(true_mm),
+                      dimnames = list(NULL, names(true_mm)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- seq(0.5, 10, length.out = n)  
+    mu  <- true_mm["Vmax"] * x / (true_mm["Km"] + x)
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      nls(y ~ Vmax * x/(Km + x),
+          start = list(Vmax = 1, Km = 1),
+          data = data.frame(x,y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      vc <- try(vcov(fit), silent = TRUE)
+      if (!inherits(vc, "try-error")) {
+        beta <- coef(fit)
+        se <- sqrt(diag(vc))
+        zc <- qnorm(0.975)
+        
+        cis_low  <- beta - zc * se
+        cis_high <- beta + zc * se
+        cov_mm[i, ] <- (true_mm >= cis_low & true_mm <= cis_high)
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_mm, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results <- rbind(results, data.frame(
+      model     = "Michaelis-Menten",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Exponential model
+  true_exp   <- c(y0 = 1.0, r = 0.3)
+  cov_exp    <- matrix(FALSE, nsim, length(true_exp),
+                       dimnames = list(NULL, names(true_exp)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- seq(0, 3, length.out = n)
+    mu  <- true_exp["y0"] * exp(true_exp["r"] * x)
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      nls(y ~ y0 * exp(r * x),
+          start = list(y0 = 1, r = 0.1),
+          data = data.frame(x,y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      vc <- try(vcov(fit), silent = TRUE)
+      if (!inherits(vc, "try-error")) {
+        beta <- coef(fit)
+        se <- sqrt(diag(vc))
+        zc <- qnorm(0.975)
+        
+        cis_low  <- beta - zc * se
+        cis_high <- beta + zc * se
+        cov_exp[i, ] <- (true_exp >= cis_low & true_exp <= cis_high)
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_exp, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results <- rbind(results, data.frame(
+      model     = "Exponential",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Gompertz model  
+  true_gom   <- c(A = 10, B = 3, C = 0.5)
+  cov_gom    <- matrix(FALSE, nsim, length(true_gom),
+                       dimnames = list(NULL, names(true_gom)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- seq(0, 10, length.out = n) 
+    mu  <- true_gom["A"] * exp(-true_gom["B"] * exp(-true_gom["C"] * x))
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      nls(y ~ A * exp(-B * exp(-C * x)),
+          start = list(A = 5, B = 2, C = 0.3),
+          data = data.frame(x,y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      vc <- try(vcov(fit), silent = TRUE)
+      if (!inherits(vc, "try-error")) {
+        beta <- coef(fit)
+        se <- sqrt(diag(vc))
+        zc <- qnorm(0.975)
+        
+        cis_low  <- beta - zc * se
+        cis_high <- beta + zc * se
+        cov_gom[i, ] <- (true_gom >= cis_low & true_gom <= cis_high)
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_gom, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results <- rbind(results, data.frame(
+      model     = "Gompertz",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # 4-parameter logistic model
+  true_dose <- c(b = 2, c = 0.1, d = 10, e = 5)
+  cov_dose  <- matrix(FALSE, nsim, length(true_dose),
+                      dimnames = list(NULL, names(true_dose)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- seq(0.1, 20, length.out = n)  
+    mu  <- true_dose["c"] +
+      (true_dose["d"] - true_dose["c"]) /
+      (1 + (x / true_dose["e"])^true_dose["b"])
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      drm(y ~ x, data = data.frame(x,y), fct = LL.4()),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      vc <- try(vcov(fit), silent = TRUE)
+      if (!inherits(vc, "try-error")) {
+        beta <- coef(fit)
+        se <- sqrt(diag(vc))
+        zc <- qnorm(0.975)
+        
+        cis_low  <- beta - zc * se
+        cis_high <- beta + zc * se
+        cov_dose[i, ] <- (true_dose >= cis_low & true_dose <= cis_high)
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_dose, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results <- rbind(results, data.frame(
+      model     = "4-Parameter Logistic",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+# one extra colour so we can cover all 11 parameters across panels
+thesis_palette <- c(thesis_palette, "navy" = "#114477")
+
+ggplot(results, aes(x = n, y = coverage, colour = parameter, group = parameter)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.3) +
+  geom_hline(yintercept = 0.95, linetype = "dashed") +
+  facet_wrap(~ model, ncol = 2) +
+  scale_x_continuous(breaks = sizes) +
+  scale_colour_manual(values = unname(thesis_palette)) +  # << switch
+  labs(x = "Sample size (n)", y = "Empirical coverage", colour = "Parameter") +
+  theme_thesis(grid = "y") +
+  coord_cartesian(ylim = c(0.70, 1.0))
+```
+
+@fig-wald-coverage highlights the coverage rate across samples sizes and models. The red-dashed line represents the 95% nominal coverage rate. The Wald coverage results reveal crucial patterns:
+
+1.  **Failure at n=5**: Coverage drops to 70-80%, far below the nominal 95%. With only 5 observations, asymptotic theory completely breaks down.
+
+2.  **Rapid improvement**: By n=20, most models achieve near-nominal coverage. The asymptotic approximation becomes effective with a relatively small sample size.
+
+3.  **Model complexity matters**: The 4-parameter logistic shows more erratic coverage, especially for threshold parameters (b, c). Complex models need larger samples for reliable inference.
+
+The key takeaway: Wald intervals are remarkably robust for $n \geq 20$ but should be viewed skeptically for smaller samples.
+
+#### Profile-t Confidence Intervals
+
+Profile-t uses studentized statistics (@eq-profile-t-statistic) with t-distribution critical values. The Implementation is restricted to models with native R support. For a theoretical development of a profile likelihood approach for dose-response models, see @sec-appendix-alternative-profile. For full implementation details of the code for profile-t coverage simulation see @sec-appendix-coverage-rate-profile.
+
+The profile-t simulation implements studentized profile likelihood intervals:
+
+-   **Profile-t via R's `confint()`** which implements studentized profile likelihood by default
+-   **Computational intensity** from multiple optimization runs per parameter
+-   **Failure modes** include flat likelihood surfaces and numerical precision issues
+-   **Expected improvements** over Wald due to finite-sample t-distribution adjustment
+
+```{r profile-simulation, echo=FALSE, warning=FALSE, message=FALSE, fig.cap="Coverage rates of profile-t confidence intervals."}
+# Profile-t simulation (computationally intensive, so fewer models)
+set.seed(2025)
+results_pl <- data.frame(
+  model     = character(),
+  parameter = character(),
+  n         = integer(),
+  coverage  = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (n in sizes) {
+  # Michaelis-Menten
+  true_mm <- c(Vmax = 2.0, Km = 1.5)
+  cov_mm  <- matrix(FALSE, nsim, length(true_mm),
+                    dimnames = list(NULL, names(true_mm)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- seq(0.5, 10, length.out = n)  
+    mu  <- true_mm["Vmax"] * x / (true_mm["Km"] + x)
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      nls(y ~ Vmax * x/(Km + x),
+          start = list(Vmax = 1, Km = 1),
+          data = data.frame(x, y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      ci <- try(confint(fit, level = 0.95), silent = TRUE)
+      if (!inherits(ci, "try-error")) {
+        low  <- ci[,1]
+        high <- ci[,2]
+        cov_mm[i, ] <- (true_mm >= low & true_mm <= high)
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_mm, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results_pl <- rbind(results_pl, data.frame(
+      model     = "Michaelis-Menten",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Exponential
+  true_exp <- c(y0 = 1.0, r = 0.3)
+  cov_exp  <- matrix(FALSE, nsim, length(true_exp),
+                     dimnames = list(NULL, names(true_exp)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- seq(0, 3, length.out = n)
+    mu  <- true_exp["y0"] * exp(true_exp["r"] * x)
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      nls(y ~ y0 * exp(r * x),
+          start = list(y0 = 1, r = 0.1),
+          data = data.frame(x, y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      ci <- try(confint(fit, level = 0.95), silent = TRUE)
+      if (!inherits(ci, "try-error")) {
+        low  <- ci[,1]
+        high <- ci[,2]
+        cov_exp[i, ] <- (true_exp >= low & true_exp <= high)
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_exp, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results_pl <- rbind(results_pl, data.frame(
+      model     = "Exponential",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Gompertz
+  true_gom <- c(A = 10, B = 3, C = 0.5)
+  cov_gom  <- matrix(FALSE, nsim, length(true_gom),
+                     dimnames = list(NULL, names(true_gom)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- seq(0, 10, length.out = n)  
+    mu  <- true_gom["A"] * exp(-true_gom["B"] * exp(-true_gom["C"] * x))
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      nls(y ~ A * exp(-B * exp(-C * x)),
+          start = list(A = 5, B = 2, C = 0.3),
+          data = data.frame(x, y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      ci <- try(confint(fit, level = 0.95), silent = TRUE)
+      if (!inherits(ci, "try-error")) {
+        low  <- ci[,1]
+        high <- ci[,2]
+        cov_gom[i, ] <- (true_gom >= low & true_gom <= high)
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_gom, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results_pl <- rbind(results_pl, data.frame(
+      model     = "Gompertz",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+# Plot profile-t coverage
+ggplot(results_pl, aes(x = n, y = coverage, colour = parameter, group = parameter)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.3) +
+  geom_hline(yintercept = 0.95, linetype = "dashed") +
+  facet_wrap(~ model, ncol = 2) +
+  scale_x_continuous(breaks = sizes) +
+  scale_colour_manual(values = unname(thesis_palette)) +
+  labs(x = "Sample size (n)", y = "Empirical coverage", colour = "Parameter") +
+  theme_thesis(grid = "y") +
+  coord_cartesian(ylim = c(0.70, 1.0)) +
+  guides(colour = guide_legend(ncol = 4, byrow = TRUE))
+```
+
+Profile-t results demonstrate clear superiority:
+
+1.  **Small-sample excellence**: Even at n=10, coverage hovers near 95%. The t-distribution adjustment and likelihood profiling provide finite-sample corrections that work.
+
+2.  **Consistent performance**: Unlike Wald's erratic small-sample behavior, profile-t maintains steady coverage across sample sizes.
+
+3.  **Computational cost justified**: Each profile-t interval requires many constrained optimizations versus Wald's single fit. For critical inferences, this increase in computation buys substantial accuracy.
+
+Critical to mention is that native profile-t support is not available for all model classes, as exemplified by the dose response model. Researchers are required to implement manual solutions.
+
+Nevertheless, the theoretical advantages of profile-t translate directly to practical benefits.
+
+#### Bootstrap Confidence Intervals
+
+Bootstrap uses residual resampling with percentile intervals (@eq-bootstrap-percentile). Implementation in @sec-appendix-coverage-rate-bootstrap.
+
+Bootstrap simulation implements residual resampling with percentile intervals:
+
+-   **Nonparametric bootstrap** via `nlsBoot()` with mean centered residuals resampled
+-   **Reduced simulation scale** due to computational intensity ($B \times n_{sim}$ fits required)
+-   **Direct CI extraction** from `bootCI` object percentiles
+-   **Special handling** for 4-parameter logistic requiring two-stage fitting
+-   **Bootstrap-specific failures** from sample degeneracy or starting value sensitivity
+
+```{r bootstrap-simulation, eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE, fig.cap="Coverage rates of bootstrap confidence intervals."}
+library(nlstools)
+library(drc)
+library(ggplot2)
+
+set.seed(2025)
+sigma <- 0.25
+nsim_boot <- 100
+sizes_boot <- c(10, 20, 50, 100)
+B <- 500  # Bootstrap replicates
+
+results_boot <- data.frame(
+  model     = character(),
+  parameter = character(),
+  n         = integer(),
+  coverage  = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (n in sizes_boot) {
+  
+  # Michaelis-Menten
+  true_mm <- c(Vmax = 2.0, Km = 1.5)
+  cov_mm  <- matrix(FALSE, nsim_boot, length(true_mm),
+                    dimnames = list(NULL, names(true_mm)))
+  
+  successful_boots <- 0
+  for (i in seq_len(nsim_boot)) {
+    x   <- seq(0.5, 10, length.out = n)  
+    mu  <- true_mm["Vmax"] * x / (true_mm["Km"] + x)
+    y   <- mu + rnorm(n, sd = sigma)
+    df  <- data.frame(x = x, y = y)
+    
+    fit <- try(
+      nls(y ~ Vmax * x/(Km + x),
+          start = list(Vmax = 1, Km = 1),
+          data = df,
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      boot_res <- try(nlsBoot(fit, niter = B), silent = TRUE)
+      if (!inherits(boot_res, "try-error")) {
+        successful_boots <- successful_boots + 1
+        ci_matrix <- boot_res$bootCI
+        
+        cov_mm[i, "Vmax"] <- (true_mm["Vmax"] >= ci_matrix["Vmax", "2.5%"] && 
+                              true_mm["Vmax"] <= ci_matrix["Vmax", "97.5%"])
+        cov_mm[i, "Km"] <- (true_mm["Km"] >= ci_matrix["Km", "2.5%"] && 
+                            true_mm["Km"] <= ci_matrix["Km", "97.5%"])
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_mm, na.rm = TRUE)
+  
+  for (par in names(cov_vec)) {
+    if (!is.na(cov_vec[par])) {
+      results_boot <- rbind(results_boot, data.frame(
+        model     = "Michaelis-Menten",
+        parameter = par,
+        n         = n,
+        coverage  = cov_vec[par],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # Exponential
+  true_exp <- c(y0 = 1.0, r = 0.3)
+  cov_exp  <- matrix(FALSE, nsim_boot, length(true_exp),
+                     dimnames = list(NULL, names(true_exp)))
+  
+  successful_boots <- 0
+  for (i in seq_len(nsim_boot)) {
+    x   <- seq(0, 3, length.out = n)
+    mu  <- true_exp["y0"] * exp(true_exp["r"] * x)
+    y   <- mu + rnorm(n, sd = sigma)
+    df  <- data.frame(x = x, y = y)
+    
+    fit <- try(
+      nls(y ~ y0 * exp(r * x),
+          start = list(y0 = 1, r = 0.1),
+          data = df,
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      boot_res <- try(nlsBoot(fit, niter = B), silent = TRUE)
+      if (!inherits(boot_res, "try-error")) {
+        successful_boots <- successful_boots + 1
+        ci_matrix <- boot_res$bootCI
+        
+        cov_exp[i, "y0"] <- (true_exp["y0"] >= ci_matrix["y0", "2.5%"] && 
+                             true_exp["y0"] <= ci_matrix["y0", "97.5%"])
+        cov_exp[i, "r"] <- (true_exp["r"] >= ci_matrix["r", "2.5%"] && 
+                            true_exp["r"] <= ci_matrix["r", "97.5%"])
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_exp, na.rm = TRUE)
+  
+  for (par in names(cov_vec)) {
+    if (!is.na(cov_vec[par])) {
+      results_boot <- rbind(results_boot, data.frame(
+        model     = "Exponential",
+        parameter = par,
+        n         = n,
+        coverage  = cov_vec[par],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # Gompertz
+  true_gom <- c(A = 10, B = 3, C = 0.5)
+  cov_gom  <- matrix(FALSE, nsim_boot, length(true_gom),
+                     dimnames = list(NULL, names(true_gom)))
+  
+  successful_boots <- 0
+  for (i in seq_len(nsim_boot)) {
+    x   <- seq(0, 10, length.out = n)  
+    mu  <- true_gom["A"] * exp(-true_gom["B"] * exp(-true_gom["C"] * x))
+    y   <- mu + rnorm(n, sd = sigma)
+    df  <- data.frame(x = x, y = y)
+    
+    fit <- try(
+      nls(y ~ A * exp(-B * exp(-C * x)),
+          start = list(A = 5, B = 2, C = 0.3),
+          data = df,
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit, "try-error")) {
+      boot_res <- try(nlsBoot(fit, niter = B), silent = TRUE)
+      if (!inherits(boot_res, "try-error")) {
+        successful_boots <- successful_boots + 1
+        ci_matrix <- boot_res$bootCI
+        
+        cov_gom[i, "A"] <- (true_gom["A"] >= ci_matrix["A", "2.5%"] && 
+                            true_gom["A"] <= ci_matrix["A", "97.5%"])
+        cov_gom[i, "B"] <- (true_gom["B"] >= ci_matrix["B", "2.5%"] && 
+                            true_gom["B"] <= ci_matrix["B", "97.5%"])
+        cov_gom[i, "C"] <- (true_gom["C"] >= ci_matrix["C", "2.5%"] && 
+                            true_gom["C"] <= ci_matrix["C", "97.5%"])
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_gom, na.rm = TRUE)
+  
+  for (par in names(cov_vec)) {
+    if (!is.na(cov_vec[par])) {
+      results_boot <- rbind(results_boot, data.frame(
+        model     = "Gompertz",
+        parameter = par,
+        n         = n,
+        coverage  = cov_vec[par],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # 4-parameter logistic
+  true_dose <- c(b = 2, c = 0.1, d = 10, e = 5)
+  cov_dose  <- matrix(FALSE, nsim_boot, length(true_dose),
+                      dimnames = list(NULL, names(true_dose)))
+  
+  successful_boots <- 0
+  for (i in seq_len(nsim_boot)) {
+    x   <- seq(0.1, 20, length.out = n)  
+    mu  <- true_dose["c"] +
+      (true_dose["d"] - true_dose["c"]) /
+      (1 + (x / true_dose["e"])^true_dose["b"])
+    y   <- mu + rnorm(n, sd = sigma)
+    df  <- data.frame(x = x, y = y)
+    
+    # First fit with drc
+    fit_drm <- try(
+      drm(y ~ x, data = df, fct = LL.4()),
+      silent = TRUE
+    )
+    
+    if (!inherits(fit_drm, "try-error")) {
+      # Extract coefficients for nls starting values
+      drm_coef <- coef(fit_drm)
+      
+      # Refit with nls for bootstrap
+      fit_nls <- try(
+        nls(y ~ c + (d - c) / (1 + (x / e)^b),
+            start = list(b = drm_coef["b:(Intercept)"], 
+                        c = drm_coef["c:(Intercept)"],
+                        d = drm_coef["d:(Intercept)"], 
+                        e = drm_coef["e:(Intercept)"]),
+            data = df,
+            control = nls.control(warnOnly = TRUE)),
+        silent = TRUE
+      )
+      
+      if (!inherits(fit_nls, "try-error")) {
+        boot_res <- try(nlsBoot(fit_nls, niter = B), silent = TRUE)
+        if (!inherits(boot_res, "try-error")) {
+          successful_boots <- successful_boots + 1
+          ci_matrix <- boot_res$bootCI
+          
+          cov_dose[i, "b"] <- (true_dose["b"] >= ci_matrix["b", "2.5%"] && 
+                               true_dose["b"] <= ci_matrix["b", "97.5%"])
+          cov_dose[i, "c"] <- (true_dose["c"] >= ci_matrix["c", "2.5%"] && 
+                               true_dose["c"] <= ci_matrix["c", "97.5%"])
+          cov_dose[i, "d"] <- (true_dose["d"] >= ci_matrix["d", "2.5%"] && 
+                               true_dose["d"] <= ci_matrix["d", "97.5%"])
+          cov_dose[i, "e"] <- (true_dose["e"] >= ci_matrix["e", "2.5%"] && 
+                               true_dose["e"] <= ci_matrix["e", "97.5%"])
+        }
+      }
+    }
+  }
+  
+  cov_vec <- colMeans(cov_dose, na.rm = TRUE)
+  
+  for (par in names(cov_vec)) {
+    if (!is.na(cov_vec[par])) {
+      results_boot <- rbind(results_boot, data.frame(
+        model     = "4-Parameter Logistic",
+        parameter = par,
+        n         = n,
+        coverage  = cov_vec[par],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+}
+
+# Plot bootstrap coverage
+ggplot(results_boot, aes(x = n, y = coverage, colour = parameter, group = parameter)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.3) +
+  geom_hline(yintercept = 0.95, linetype = "dashed") +
+  facet_wrap(~ model, ncol = 2) +
+  scale_x_continuous(breaks = sizes_boot) +
+  scale_colour_manual(values = unname(thesis_palette)) +
+  labs(x = "Sample size (n)", y = "Empirical coverage", colour = "Parameter") +
+  theme_thesis(grid = "y") +
+  coord_cartesian(ylim = c(0.80, 1.0)) +
+  guides(colour = guide_legend(ncol = 4, byrow = TRUE))
+```
+
+Bootstrap results reveal important patterns:
+
+1.  **Small samples (n = 10)**\
+    Coverage falls to \~0.80–0.90 for most parameters, indicating that resampling a tiny data set cannot fully recreate the true sampling distribution, so bootstrap CIs tend to be too narrow.
+
+2.  **Rapid improvement (n = 20)**\
+    A single doubling of n already lifts coverage close to the 0.95 band for most parameters, demonstrating how quickly the bootstrap stabilises once each resample contains a reasonable variety of observations.
+
+3.  **Near-nominal performance (n \> 50)**\
+    From n = 50 onward, coverage converges tightly around the 0.95 target. The overshoot visible for some parameters (e.g., *Km* in Michaelis–Menten or - quite pronounced - for the parameters in the exponential function) reflects conservative intervals.
+
+4.  **Heterogeneity across parameters shrinks with n**\
+    At n = 10 some parameters lag behind others, but by n = 100 the curves have nearly merged. In large samples, model form and parameter scale matter far less than the sheer number of independent observations.
+
+5.  **Computational cost and convergence**\
+    Each bootstrap replicate requires a full nonlinear fit (500 per data set here). For the 4-parameter logistic, a fraction of replicates failed to converge, slightly lowering effective B and producing a conservative bias. Parallelisation and automatic refits for failed draws can mitigate this burden without sacrificing accuracy.
+
+The bootstrap excels when distributional assumptions are suspect but requires adequate sample size for the resampling principle to work.
+
+#### Recommendation: Which Method When?
+
+Our coverage study yields clear recommendations for choosing confidence interval methods in nonlinear regression:
+
+**For small samples (**$n < 20$):\
+The profile-$t$ method is the gold standard, achieving coverage rates close to the nominal level even at $n = 10$. In contrast, the bootstrap method tends to underperform due to limited resampling variability. Wald intervals should be avoided in this regime, as they systematically undercover the true parameter values.
+
+**For moderate samples (**$20 < n < 50$):\
+All methods perform reasonably well in this range. The choice of method can therefore depend on practical considerations such as computational resources or concerns about distributional assumptions. While the profile-$t$ method still performs slightly better, the differences between methods become less pronounced.
+
+**For larger samples (**$n > 50$):\
+As the sample size increases, the performance of all methods converges. The Wald method becomes increasingly attractive due to its computational simplicity, especially in exploratory analyses. However, for final inference, it is advisable to prefer the profile-$t$ or bootstrap method if computational resources allow.
+
+**Special considerations**:\
+For complex models with four or more parameters, all methods require larger samples to maintain reliable coverage. The bootstrap method is particularly effective when residuals are non-normally distributed, while the profile-$t$ method remains the most robust choice in the presence of severe nonlinearity. The Wald method is appropriate for well-behaved models when the data are sufficiently informative.
+
+#### Limitations
+
+-   **Conditional coverage (convergence-dependent).** Coverage is computed only over successful fits, i.e., it is conditional on convergence and can be optimistic at small $n$ or for weakly identified parameters. Future work should also report unconditional coverage (count non-convergent fits as not covered) and show convergence rates.
+
+-   **Favorable starting values.** Starts are close to the true parameters, which inflates convergence and can benefit Wald-type procedures. A sensitivity analysis with rough starts (e.g., jittered around truth) could be added.
+
+-   **Bootstrap scope.** Current results use `nlstools::nlsBoot()` (nonparametric residual resampling) with percentile intervals. Future work should compare alternative bootstraps (case/pairs, parametric, wild) and interval types (BCa, studentized), and vary $B$ with auto-refits for failed replicates.
+
+
+### Robust Confidence Intervals for Heteroscedastic Data {#sec-robust-confidence-intervals}
+
+As demonstrated in our diagnostic analysis in the previous Chapter 4, the assumption of constant variance is often violated. Especially real data often violates the constant variance assumption, particularly in growth models where variance scales with mean. Standard errors computed under homoscedasticity can be optimistic, leading to false discoveries. We demonstrate heteroscedasticity-consistent (HC) inference. This is a distinct concept from the outlier-robust methods in @sec-robust-nonlinear.
+
+```{r robust-ci, message=FALSE, warning=FALSE}
+library(sandwich)
+library(lmtest)
+
+# heteroscedastic data
+set.seed(321)
+x_het <- runif(100, 0.1, 10)
+y_het <- beta_true[1] * x_het / (beta_true[2] + x_het) + 
+         rnorm(100, 0, 0.05 * sqrt(x_het))  # Variance proportional to sqrt(x)
+
+# fit model
+fit_het <- nls(y_het ~ Vmax * x_het / (Km + x_het), 
+               start = list(Vmax = 1, Km = 1))
+
+
+coeftest(fit_het) # assuming heteroscedasticty
+
+coeftest(fit_het, vcov. = sandwich) #HC-consistent standard errors
+```
+
+The results reveal heteroscedasticity’s impact: parameter estimates are unchanged—both approaches yield $\hat{V}_{max} = 1.974$ and $\hat{K}_m = 1.414$, indicating no bias in point estimates. However, standard errors differ, with the HC adjustment barely affecting $V_{max}$ (0.0336 vs 0.0340) but substantially reducing $K_m$ (0.1014 to 0.0798); consequently, the $t$-statistic for $K_m$ increases from 13.95 to 17.73, and confidence intervals narrow accordingly.
+
+### Practical Implementation of Prediction Intervals {#sec-prediction-intervals-applied}
+
+Scientists often confuse confidence and prediction intervals, with serious consequences. A precisely estimated dose-response curve (narrow confidence bands) might still yield highly variable patient responses (wide prediction bands). We demonstrate proper prediction interval construction accounting for both sources of uncertainty.
+
+```{r pred-interval-mc, echo=TRUE, message=FALSE, warning=FALSE}
+# Load necessary library
+library(propagate)
+
+# generate data
+set.seed(42)
+x <- seq(0.1, 10, length.out = 100)
+Vmax <- 2
+Km <- 1.5
+y <- Vmax * x / (Km + x) + rnorm(length(x), sd = 0.1)
+df <- data.frame(x = x, y = y)
+
+# fit nonlinear model
+fit <- nls(y ~ Vmax * x / (Km + x), data = df, start = list(Vmax = 1, Km = 1))
+
+# new x values to predict
+x_new <- seq(0.1, 10, length.out = 100)
+newdat <- data.frame(x = x_new)
+
+#pred intervals with predictNLS
+sim <- predictNLS(
+  model    = fit,
+  newdata  = newdat,
+  interval = "prediction",
+  alpha    = 0.05,
+  nsim     = 10000
+)
+
+
+head(sim$summary[,c("Prop.Mean.1", "Prop.sd.1", "Sim.Mean", "Sim.sd", "Sim.2.5%", "Sim.97.5%")])
+```
+
+This table is generated using `interval = "prediction"`. When this option is used, the function calculates the total uncertainty for a single new data point using two different methods:
+
+-   **`Prop.sd.1` (Taylor Expansion Method):** This is the total prediction uncertainty calculated via the "Delta Method" mathematical shortcut. Because `interval = "prediction"`, it correctly includes both parameter uncertainty and the random data scatter (`sd = 0.1`).
+-   **`Sim.sd` (Monte Carlo Method):** This is the total prediction uncertainty calculated via "brute-force" simulation, which also includes both parameter uncertainty and the random data scatter.
+
+```{r pred-interval-viz, echo=FALSE, fig.cap="Confidence bands (blue) versus prediction bands (orange) for Michaelis-Menten model.", message=FALSE, warning=FALSE}
+# Calculate confidence intervals separately for the visualization
+# This only accounts for parameter uncertainty
+conf_sim <- predictNLS(
+  model    = fit,
+  newdata  = newdat,
+  interval = "confidence",
+  alpha    = 0.05,
+  nsim     = 10000
+)
+
+# Load visualization library
+library(ggplot2)
+
+# Prepare a dataframe for plotting
+viz_df <- data.frame(
+  x          = x_new,
+  fit        = sim$summary[, "Prop.Mean.1"], # Fitted line
+  conf_lower = conf_sim$summary[, "Sim.2.5%"],
+  conf_upper = conf_sim$summary[, "Sim.97.5%"],
+  pred_lower = sim$summary[, "Sim.2.5%"],
+  pred_upper = sim$summary[, "Sim.97.5%"]
+)
+
+# Create the visualization
+ggplot(viz_df, aes(x = x)) +
+  # Prediction interval ribbon
+  geom_ribbon(aes(ymin = pred_lower, ymax = pred_upper),
+              fill = "orange", alpha = 0.3) +
+  # Confidence interval ribbon
+  geom_ribbon(aes(ymin = conf_lower, ymax = conf_upper),
+              fill = "blue", alpha = 0.5) +
+  # Fitted line
+  geom_line(aes(y = fit), color = "black", linewidth = 1) +
+  # Original data points
+  geom_point(data = df, aes(x = x, y = y), alpha = 0.3, size = 0.8) +
+  # Labels and annotations
+  labs(
+    x = "Substrate concentration",
+    y = "Reaction rate",
+    title = "Confidence vs Prediction Intervals"
+  ) +
+  annotate("text", x = 8, y = 1.5, label = "95% Confidence\nInterval",
+           color = "blue", size = 3) +
+  annotate("text", x = 8, y = 0.8, label = "95% Prediction\nInterval",
+           color = "darkorange", size = 3) +
+  theme_classic(base_family = "serif", base_size = 12)
+```
+
+The visualization starkly illustrates the distinction between a confidence and a prediction interval.
+
+-   **Blue Bands (Confidence):** These are narrow because they come from to `predictNLS` using `interval = "confidence"`. This calculation only considers the uncertainty in the model parameters.
+
+-   **Orange Bands (Prediction):** These are much wider because they use the results from a `interval = "prediction"` call. This calculation correctly combines the small parameter uncertainty with the large random data scatter (`sd = 0.1`). Th
+
+This difference has profound implications. When regulators ask "what enzyme activity should we expect?", they need the wide **prediction intervals**. When scientists ask "what is the true maximum velocity?", they need the narrow **confidence intervals** around the parameter estimate. Confusing them leads to over-optimistic predictions or unnecessarily wide parameter bounds.
+
+## Hypothesis Testing
+
+Beyond parameter estimation, scientists test specific hypotheses encoding theoretical predictions. Does cooperativity exist (Hill coefficient \> 1)? Are growth rates equal across treatments? Do simplified models adequately represent the data? This section demonstrates formal testing procedures.
+
+### Testing Individual Parameters
+
+The simplest tests evaluate whether parameters equal specific values, typically zero:
+
+```{r t-tests, message=FALSE, warning=FALSE}
+# standard summary includes t-tests against zero
+summary(fit)
+```
+
+Both parameters are far from zero (Wald t-tests: $p < 2\times 10^{-16}$), i.e., we reject $V_{\max}=0$ and $K_m=0$.
+
+### Testing Nested Models
+
+Scientific theories often translate to parameter constraints. We test whether we could fix $K_m = 1.5$ (arbitrarily chosen) using both F-test and LRT:
+
+```{r nested-tests, message=FALSE, warning=FALSE}
+fit_reduced <- nls(y ~ Vmax * x / (1.5 + x),
+                   start = list(Vmax = coef(fit)["Vmax"]))
+
+# f-test
+anova(fit_reduced, fit)
+
+# Likelihood ratio test
+library(lmtest)
+lrtest(fit_reduced, fit)
+```
+
+Both tests yield virtually identical results:
+
+-   F-statistic: 0.013 (p = 0.91)
+-   LR statistic: 0.013 (p = 0.91)
+
+We cannot reject $H_0: K_m = 1.5$. The data are consistent with the literature value, validating our experimental system. The near-perfect agreement between F and LR tests reflects their asymptotic equivalence.
+
+### Model Selection for Non-Nested Alternatives
+
+When models are not nested-Michaelis-Menten versus Hill kinetics, for instance-formal tests do not apply. Information criteria balance fit against complexity:
+
+```{r ic-comparison, message=FALSE, warning=FALSE}
+# alternative models
+fit_linear <- lm(y ~ x)
+fit_quad   <- lm(y ~ x + I(x^2))
+fit_hill   <- nls(y ~ Vmax * x^n / (K^n + x^n),
+                  start = list(Vmax = coef(fit)["Vmax"],
+                               K = coef(fit)["Km"],
+                               n = 1))
+models <- list(
+  MichaelisMenten = fit,
+  Linear          = fit_linear,
+  Quadratic       = fit_quad,
+  Hill            = fit_hill
+)
+
+ic_df <- data.frame(
+  Model = names(models),
+  Parameters = c(2, 2, 3, 3),
+  AIC = sapply(models, AIC),
+  BIC = sapply(models, BIC),
+  row.names = NULL
+)
+
+ic_df <- ic_df[order(ic_df$AIC),]
+ic_df$Delta_AIC <- ic_df$AIC - min(ic_df$AIC)
+ic_df$Delta_BIC <- ic_df$BIC - min(ic_df$BIC)
+
+print(ic_df[,c("Model", "Parameters", "AIC", "Delta_AIC", "BIC", "Delta_BIC")])
+```
+
+Model selection sends mixed signals: AIC slightly prefers the Hill model ($\Delta\text{AIC}\approx 0$) because the modest likelihood gain offsets the $2p$ penalty, whereas BIC favors Michaelis–Menten since its heavier $\log n$ per-parameter penalty outweighs the benefit of estimating a free Hill exponent once $n$ is large enough that $\log n>2$. In practice, the fitted Hill exponent $\hat n\approx1$ collapses the three-parameter Hill curve onto the two-parameter MM curve, so predictive gains are negligible (typically $\Delta\text{AIC}\approx2$ and $\Delta\text{BIC}>0$). For interpretability and parsimony, choose MM (consistent with BIC and Occam’s razor); for pure prediction, either model is acceptable, as a $\Delta\text{AIC}<2$ rarely provides strong evidence against the simpler alternative.
+

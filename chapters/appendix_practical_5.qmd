@@ -1,0 +1,655 @@
+# Coverage Rate Wald {#sec-appendix-coverage-rate-wald}
+
+## Key Ingredients of the Simulation
+
+- **Manual Wald CIs via**
+
+  ```r
+  vc   <- vcov(fit)
+  beta <- coef(fit)
+  se    <- sqrt(diag(vc))
+  zc    <- qnorm(0.975)
+  cis_low  <- beta - zc * se
+  cis_high <- beta + zc * se
+  ```
+
+  We compute simple Wald intervals for every parameter in each replicate. These always exist and avoid failures from profile‐likelihood methods.
+
+- **Robust Error Handling with**
+
+  ```r
+  fit <- try(nls(...), silent = TRUE)
+  if (inherits(fit, "try-error")) next
+  ```
+
+  Any non‐convergence or numerical issue simply skips that replicate, preventing the script from crashing. On the other hand, we are now calculating conditional converage. If a method fails more often when the truth is extreme or n is small, coverage is optimistic.
+
+- **Good Starting Values** Each nonlinear fit uses start values close to the true parameters (e.g. `start=list(Vmax=1,Km=1)` when the truth is `(2.0,1.5)`), ensuring high convergence rates, especially at small sample sizes.
+
+- **Consistent Noise Level ($\sigma = 0.25$)** A standard deviation of 0.25 makes the estimation challenging: CIs widen and small‐n coverage drops below the nominal 95%.
+
+- **Multiple Sample Sizes & Replication**
+
+  ```r
+  sizes <- c(5, 10, 20, 50, 75, 100)
+  nsim  <- 500
+  ```
+
+  We evaluate performance from extreme small ($n=5$) to moderate ($n=100$) using 500 simulated datasets per size.
+
+- **Tallying Coverage & Handling Skipped Runs**
+
+  ```r
+  cov_mat[i, ] <- (true_params >= cis_low & true_params <= cis_high)
+  cov_vec <- colMeans(cov_mat, na.rm = TRUE)
+  ```
+
+  By initializing the coverage matrix with `NA` and using `na.rm = TRUE`, the coverage proportion is always "converged".
+
+- **Warnings about NaNs produced** Some replicates generate NaN estimates or interval bounds (e.g., when fits fail or parameters become invalid), triggering R warnings. These NaNs appear in the coverage matrices but are automatically excluded by `na.rm = TRUE`, so only successful fits contribute to the final coverage proportions.
+
+
+```{r wald-simulation, echo = TRUE, eval = FALSE}
+library(stats)
+library(drc)
+library(ggplot2)
+
+set.seed(2025)
+nsim   <- 500
+sigma  <- 0.25
+sizes  <- c(5, 10, 20, 50, 75, 100)
+
+results <- data.frame(
+  model     = character(),
+  parameter = character(),
+  n         = integer(),
+  coverage  = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (n in sizes) {
+  # Michaelis-Menten
+  true_mm   <- c(Vmax = 2.0, Km = 1.5)
+  cov_mm    <- matrix(FALSE, nsim, length(true_mm),
+                      dimnames = list(NULL, names(true_mm)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- runif(n, 0.5, 10)
+    mu  <- true_mm["Vmax"] * x / (true_mm["Km"] + x)
+    y   <- mu + rnorm(n, sd = sigma)
+    fit <- try(
+      nls(y ~ Vmax * x/(Km + x),
+          start = list(Vmax = 1, Km = 1),
+          data = data.frame(x,y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    vc    <- try(vcov(fit), silent = TRUE)
+    if (inherits(vc, "try-error")) next
+    beta <- coef(fit)
+    se <- sqrt(diag(vc))
+    zc <- qnorm(0.975)
+    
+    cis_low  <- beta - zc * se
+    cis_high <- beta + zc * se
+    cov_mm[i, ] <- (true_mm >= cis_low & true_mm <= cis_high)
+  }
+  cov_vec <- colMeans(cov_mm, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results <- rbind(results, data.frame(
+      model     = "Michaelis-Menten",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Exponential
+  true_exp   <- c(y0 = 1.0, r = 0.3)
+  cov_exp    <- matrix(FALSE, nsim, length(true_exp),
+                       dimnames = list(NULL, names(true_exp)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- seq(0, 3, length.out = n)
+    mu  <- true_exp["y0"] * exp(true_exp["r"] * x)
+    y   <- mu + rnorm(n, sd = sigma)
+    fit <- try(
+      nls(y ~ y0 * exp(r * x),
+          start = list(y0 = 1, r = 0.1),
+          data = data.frame(x,y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    vc    <- try(vcov(fit), silent = TRUE)
+    if (inherits(vc, "try-error")) next
+    beta <- coef(fit)
+    se <- sqrt(diag(vc))
+    zc <- qnorm(0.975)
+    
+    cis_low  <- beta - zc * se
+    cis_high <- beta + zc * se
+    cov_exp[i, ] <- (true_exp >= cis_low & true_exp <= cis_high)
+  }
+  cov_vec <- colMeans(cov_exp, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results <- rbind(results, data.frame(
+      model     = "Exponential",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Gompertz
+  true_gom   <- c(A = 10, B = 3, C = 0.5)
+  cov_gom    <- matrix(FALSE, nsim, length(true_gom),
+                       dimnames = list(NULL, names(true_gom)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- runif(n, 0, 10)
+    mu  <- true_gom["A"] * exp(-true_gom["B"] * exp(-true_gom["C"] * x))
+    y   <- mu + rnorm(n, sd = sigma)
+    fit <- try(
+      nls(y ~ A * exp(-B * exp(-C * x)),
+          start = list(A = 5, B = 2, C = 0.3),
+          data = data.frame(x,y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    vc    <- try(vcov(fit), silent = TRUE)
+    if (inherits(vc, "try-error")) next
+    beta <- coef(fit)
+    se <- sqrt(diag(vc))
+    zc <- qnorm(0.975)
+    
+    cis_low  <- beta - zc * se
+    cis_high <- beta + zc * se
+    cov_gom[i, ] <- (true_gom >= cis_low & true_gom <= cis_high)
+  }
+  cov_vec <- colMeans(cov_gom, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results <- rbind(results, data.frame(
+      model     = "Gompertz",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # 4-parameter logistic
+  true_dose <- c(b = 2, c = 0.1, d = 10, e = 5)
+  cov_dose  <- matrix(NA, nsim, length(true_dose),
+                      dimnames = list(NULL, names(true_dose)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- runif(n, 0.1, 20)
+    mu  <- true_dose["c"] +
+      (true_dose["d"] - true_dose["c"]) /
+      (1 + (x / true_dose["e"])^true_dose["b"])
+    y   <- mu + rnorm(n, sd = sigma)
+    fit <- try(
+      drm(y ~ x, data = data.frame(x,y), fct = LL.4()),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    vc    <- try(vcov(fit), silent = TRUE)
+    if (inherits(vc, "try-error")) next
+    beta <- coef(fit)
+    se <- sqrt(diag(vc))
+    zc <- qnorm(0.975)
+    
+    cis_low  <- beta - zc * se
+    cis_high <- beta + zc * se
+    cov_dose[i, ] <- (true_dose >= cis_low & true_dose <= cis_high)
+  }
+  cov_vec <- colMeans(cov_dose, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results <- rbind(results, data.frame(
+      model     = "4-Parameter Logistic",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+```
+  
+
+
+# Coverage Rate Profile-T Likelihood {#sec-appendix-coverage-rate-profile}
+
+## Key Ingredients of the Profile-T Likelihood Simulation
+
+- **Profile Likelihood CIs via R's confint() Method**
+
+  ```r
+  ci <- try(confint(fit, level = 0.95), silent = TRUE)
+  if (inherits(ci, "try-error")) next
+  low  <- ci[,1]
+  high <- ci[,2]
+  ```
+
+  The `confint()` function computes profile-t likelihood intervals by optimizing the likelihood surface for each parameter while profiling out the others. This method respects the nonlinear geometry of the parameter space, yielding more accurate intervals than Wald approximations, particularly for small samples and highly nonlinear models.
+
+- **Computational Intensity & Failure Modes** Profile-t likelihood requires multiple optimization runs per parameter, making it substantially slower than Wald intervals. The method can fail when: (1) the likelihood surface is flat or multimodal, (2) numerical precision issues arise near boundaries, or (3) the profiling algorithm cannot find valid endpoints within reasonable parameter bounds.
+
+- **Same Noise Level ($\sigma = 0.25$)** Maintaining consistency with the Wald simulation, we use $\sigma = 0.25$ to stress-test the methods under challenging conditions. High noise increases the likelihood of irregular likelihood surfaces and convergence failures.
+
+- **Identical Simulation Structure** We preserve the same sample sizes, number of replicates, true parameter values, and model specifications as the Wald simulation to ensure direct comparability:
+  ```r
+  sizes <- c(5, 10, 20, 50, 75, 100)
+  nsim  <- 500
+  ```
+
+- **Model-Specific Considerations**
+  - **4-Parameter Logistic**: Omitted from profile likelihood due to `drc` package limitations—the `confint()` method is not implemented for `drm` objects
+
+- **Expected Coverage Improvements** Profile likelihood should achieve coverage closer to the nominal 95% level, especially for small samples ($n < 20$) where Wald intervals systematically undercover due to their reliance on asymptotic normality assumptions.
+
+```{r profile-simulation, eval = FALSE, echo = TRUE, warning = FALSE}
+set.seed(2025)
+results_pl <- data.frame(
+  model     = character(),
+  parameter = character(),
+  n         = integer(),
+  coverage  = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (n in sizes) {
+  # Michaelis-Menten
+  true_mm <- c(Vmax = 2.0, Km = 1.5)
+  cov_mm  <- matrix(FALSE, nsim, length(true_mm),
+                    dimnames = list(NULL, names(true_mm)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- runif(n, 0.5, 10)
+    mu  <- true_mm["Vmax"] * x / (true_mm["Km"] + x)
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      nls(y ~ Vmax * x/(Km + x),
+          start = list(Vmax = 1, Km = 1),
+          data = data.frame(x, y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    
+    ci <- try(confint(fit, level = 0.95), silent = TRUE)
+    if (inherits(ci, "try-error")) next
+    
+    low  <- ci[,1]
+    high <- ci[,2]
+    cov_mm[i, ] <- (true_mm >= low & true_mm <= high)
+  }
+  
+  cov_vec <- colMeans(cov_mm, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results_pl <- rbind(results_pl, data.frame(
+      model     = "Michaelis-Menten",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Exponential
+  true_exp <- c(y0 = 1.0, r = 0.3)
+  cov_exp  <- matrix(FALSE, nsim, length(true_exp),
+                     dimnames = list(NULL, names(true_exp)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- seq(0, 3, length.out = n)
+    mu  <- true_exp["y0"] * exp(true_exp["r"] * x)
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      nls(y ~ y0 * exp(r * x),
+          start = list(y0 = 1, r = 0.1),
+          data = data.frame(x, y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    
+    ci <- try(confint(fit, level = 0.95), silent = TRUE)
+    if (inherits(ci, "try-error")) next
+    
+    low  <- ci[,1]
+    high <- ci[,2]
+    cov_exp[i, ] <- (true_exp >= low & true_exp <= high)
+  }
+  
+  cov_vec <- colMeans(cov_exp, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results_pl <- rbind(results_pl, data.frame(
+      model     = "Exponential",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Gompertz
+  true_gom <- c(A = 10, B = 3, C = 0.5)
+  cov_gom  <- matrix(FALSE, nsim, length(true_gom),
+                     dimnames = list(NULL, names(true_gom)))
+  
+  for (i in seq_len(nsim)) {
+    x   <- runif(n, 0, 10)
+    mu  <- true_gom["A"] * exp(-true_gom["B"] * exp(-true_gom["C"] * x))
+    y   <- mu + rnorm(n, sd = sigma)
+    
+    fit <- try(
+      nls(y ~ A * exp(-B * exp(-C * x)),
+          start = list(A = 5, B = 2, C = 0.3),
+          data = data.frame(x, y),
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    
+    ci <- try(confint(fit, level = 0.95), silent = TRUE)
+    if (inherits(ci, "try-error")) next
+    
+    low  <- ci[,1]
+    high <- ci[,2]
+    cov_gom[i, ] <- (true_gom >= low & true_gom <= high)
+  }
+  
+  cov_vec <- colMeans(cov_gom, na.rm = TRUE)
+  for (par in names(cov_vec)) {
+    results_pl <- rbind(results_pl, data.frame(
+      model     = "Gompertz",
+      parameter = par,
+      n         = n,
+      coverage  = cov_vec[par],
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+```
+
+
+# Coverage Rate Bootstrap Confidence Intervals {#sec-appendix-coverage-rate-bootstrap}
+
+## Key Ingredients of the Bootstrap Simulation
+
+- **Nonparametric Bootstrap via nlsBoot**
+
+  ```r
+  boot_res <- try(nlsBoot(fit, niter = B), silent = TRUE)
+  ci_matrix <- boot_res$bootCI
+  ```
+
+  The `nlsBoot` function implements residual resampling. The percentile method constructs intervals from the 2.5th and 97.5th percentiles of the bootstrap distribution.
+
+- **Reduced Simulation Scale for Computational Feasibility**
+  ```r
+  nsim_boot <- 80    # Down from 500
+  sizes_boot <- c(10, 20, 50, 100)  # Excludes n=5, 75
+  B <- 500           # Bootstrap replicates per dataset
+  ```
+  Bootstrap methods require $B \times \text{nsim}$ model fits per sample size. With $B=500$ and 80 simulations, each sample size requires many more fits than standard methods. We reduce the simulation scale while maintaining statistical validity.
+  
+  - **Same Noise Level ($\sigma = 0.25$)** Maintaining consistency with the Wald and Profile-t simulation, we use $\sigma = 0.25$ to stress-test the methods under challenging conditions. High noise increases the likelihood of irregular likelihood surfaces and convergence failures.
+
+- **Direct Confidence Interval Extraction**
+  ```r
+  cov_mm[i, "Vmax"] <- (true_mm["Vmax"] >= ci_matrix["Vmax", "2.5%"] && 
+                        true_mm["Vmax"] <= ci_matrix["Vmax", "97.5%"])
+  ```
+  The `bootCI` object contains a matrix with columns "Median", "2.5%", and "97.5%". We extract the percentile intervals directly without additional computation.
+
+- **Special Handling for 4-Parameter Logistic**
+  ```r
+  # First fit with drc for the model
+  fit_drm <- try(drm(y ~ x, data = df, fct = LL.4()), silent = TRUE)
+  # Extract coefficients for nls starting values
+  drm_coef <- coef(fit_drm)
+  # Refit with nls for bootstrap (nlsBoot requires nls object)
+  fit_nls <- try(nls(y ~ c + (d - c) / (1 + (x / e)^b), ...), silent = TRUE)
+  ```
+  Since `nlsBoot` requires an `nls` object but we prefer `drc` for dose-response fitting, we use a two-stage approach: (1) fit with `drc` to obtain reliable parameter estimates, (2) refit with `nls` using these estimates as starting values for bootstrap analysis.
+
+- **Bootstrap-Specific Failure Modes**
+  - **Bootstrap sample degeneracy**: Resampled data may lack variation in critical regions
+  - **Starting value sensitivity**: Bootstrap samples may shift the parameter space substantially
+  - **Computational burden**: Each failed bootstrap iteration still consumes computational resources
+
+- **Expected Coverage Characteristics** Bootstrap percentile intervals typically achieve good coverage for location parameters but may undercover for scale parameters or when the bootstrap distribution is skewed. The method's finite-sample properties depend critically on $B$—our choice of $B=100$ balances computational cost with interval stability.
+
+```{r, eval = FALSE, echo = TRUE}
+library(nlstools)
+library(drc)
+library(ggplot2)
+
+set.seed(2025)
+sigma <- 0.25
+nsim_boot <- 80
+sizes_boot <- c(10, 20, 50, 100)
+B <- 500
+
+results_boot <- data.frame(
+  model     = character(),
+  parameter = character(),
+  n         = integer(),
+  coverage  = numeric(),
+  stringsAsFactors = FALSE
+)
+
+for (n in sizes_boot) {
+  cat("\nSample size n =", n, "\n")
+  
+  # Michaelis-Menten
+  true_mm <- c(Vmax = 2.0, Km = 1.5)
+  cov_mm  <- matrix(FALSE, nsim_boot, length(true_mm),
+                    dimnames = list(NULL, names(true_mm)))
+  
+  for (i in seq_len(nsim_boot)) {
+    x   <- runif(n, 0.5, 10)
+    mu  <- true_mm["Vmax"] * x / (true_mm["Km"] + x)
+    y   <- mu + rnorm(n, sd = sigma)
+    df  <- data.frame(x = x, y = y)
+    
+    fit <- try(
+      nls(y ~ Vmax * x/(Km + x),
+          start = list(Vmax = 1, Km = 1),
+          data = df,
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    
+    boot_res <- try(nlsBoot(fit, niter = B), silent = TRUE)
+    if (inherits(boot_res, "try-error")) next
+    
+
+    ci_matrix <- boot_res$bootCI
+    
+    cov_mm[i, "Vmax"] <- (true_mm["Vmax"] >= ci_matrix["Vmax", "2.5%"] && 
+                          true_mm["Vmax"] <= ci_matrix["Vmax", "97.5%"])
+    cov_mm[i, "Km"] <- (true_mm["Km"] >= ci_matrix["Km", "2.5%"] && 
+                        true_mm["Km"] <= ci_matrix["Km", "97.5%"])
+  }
+  
+  cov_vec <- colMeans(cov_mm, na.rm = TRUE)
+  
+  for (par in names(cov_vec)) {
+    if (!is.na(cov_vec[par])) {
+      results_boot <- rbind(results_boot, data.frame(
+        model     = "Michaelis-Menten",
+        parameter = par,
+        n         = n,
+        coverage  = cov_vec[par],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # Exponential
+  true_exp <- c(y0 = 1.0, r = 0.3)
+  cov_exp  <- matrix(FALSE, nsim_boot, length(true_exp),
+                     dimnames = list(NULL, names(true_exp)))
+  
+  for (i in seq_len(nsim_boot)) {
+    x   <- seq(0, 3, length.out = n)
+    mu  <- true_exp["y0"] * exp(true_exp["r"] * x)
+    y   <- mu + rnorm(n, sd = sigma)
+    df  <- data.frame(x = x, y = y)
+    
+    fit <- try(
+      nls(y ~ y0 * exp(r * x),
+          start = list(y0 = 1, r = 0.1),
+          data = df,
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    
+    boot_res <- try(nlsBoot(fit, niter = B), silent = TRUE)
+    if (inherits(boot_res, "try-error")) next
+    
+    ci_matrix <- boot_res$bootCI
+    
+    cov_exp[i, "y0"] <- (true_exp["y0"] >= ci_matrix["y0", "2.5%"] && 
+                         true_exp["y0"] <= ci_matrix["y0", "97.5%"])
+    cov_exp[i, "r"] <- (true_exp["r"] >= ci_matrix["r", "2.5%"] && 
+                        true_exp["r"] <= ci_matrix["r", "97.5%"])
+  }
+  
+  cov_vec <- colMeans(cov_exp, na.rm = TRUE)
+  
+  for (par in names(cov_vec)) {
+    if (!is.na(cov_vec[par])) {
+      results_boot <- rbind(results_boot, data.frame(
+        model     = "Exponential",
+        parameter = par,
+        n         = n,
+        coverage  = cov_vec[par],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # Gompertz
+  true_gom <- c(A = 10, B = 3, C = 0.5)
+  cov_gom  <- matrix(FALSE, nsim_boot, length(true_gom),
+                     dimnames = list(NULL, names(true_gom)))
+  
+  for (i in seq_len(nsim_boot)) {
+    x   <- runif(n, 0, 10)
+    mu  <- true_gom["A"] * exp(-true_gom["B"] * exp(-true_gom["C"] * x))
+    y   <- mu + rnorm(n, sd = sigma)
+    df  <- data.frame(x = x, y = y)
+    
+    fit <- try(
+      nls(y ~ A * exp(-B * exp(-C * x)),
+          start = list(A = 5, B = 2, C = 0.3),
+          data = df,
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit, "try-error")) next
+    
+    boot_res <- try(nlsBoot(fit, niter = B), silent = TRUE)
+    if (inherits(boot_res, "try-error")) next
+    
+    ci_matrix <- boot_res$bootCI
+    
+    cov_gom[i, "A"] <- (true_gom["A"] >= ci_matrix["A", "2.5%"] && 
+                        true_gom["A"] <= ci_matrix["A", "97.5%"])
+    cov_gom[i, "B"] <- (true_gom["B"] >= ci_matrix["B", "2.5%"] && 
+                        true_gom["B"] <= ci_matrix["B", "97.5%"])
+    cov_gom[i, "C"] <- (true_gom["C"] >= ci_matrix["C", "2.5%"] && 
+                        true_gom["C"] <= ci_matrix["C", "97.5%"])
+  }
+  
+  cov_vec <- colMeans(cov_gom, na.rm = TRUE)
+  
+  for (par in names(cov_vec)) {
+    if (!is.na(cov_vec[par])) {
+      results_boot <- rbind(results_boot, data.frame(
+        model     = "Gompertz",
+        parameter = par,
+        n         = n,
+        coverage  = cov_vec[par],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+  
+  # 4-parameter logistic (dose-response)
+  true_dose <- c(b = 2, c = 0.1, d = 10, e = 5)
+  cov_dose  <- matrix(FALSE, nsim_boot, length(true_dose),
+                      dimnames = list(NULL, names(true_dose)))
+  
+  for (i in seq_len(nsim_boot)) {
+    x   <- runif(n, 0.1, 20)
+    mu  <- true_dose["c"] +
+      (true_dose["d"] - true_dose["c"]) /
+      (1 + (x / true_dose["e"])^true_dose["b"])
+    y   <- mu + rnorm(n, sd = sigma)
+    df  <- data.frame(x = x, y = y)
+    
+
+    fit_drm <- try(
+      drm(y ~ x, data = df, fct = LL.4()),
+      silent = TRUE
+    )
+    if (inherits(fit_drm, "try-error")) next
+    
+    drm_coef <- coef(fit_drm)
+    
+    fit_nls <- try( #we refit as well with nls, cause nlsboot requires nls objects
+      nls(y ~ c + (d - c) / (1 + (x / e)^b),
+          start = list(b = drm_coef["b:(Intercept)"], 
+                      c = drm_coef["c:(Intercept)"], 
+                      d = drm_coef["d:(Intercept)"], 
+                      e = drm_coef["e:(Intercept)"]),
+          data = df,
+          control = nls.control(warnOnly = TRUE)),
+      silent = TRUE
+    )
+    if (inherits(fit_nls, "try-error")) next
+    
+    boot_res <- try(nlsBoot(fit_nls, niter = B), silent = TRUE)
+    if (inherits(boot_res, "try-error")) next
+    
+    ci_matrix <- boot_res$bootCI
+    
+    cov_dose[i, "b"] <- (true_dose["b"] >= ci_matrix["b", "2.5%"] && 
+                         true_dose["b"] <= ci_matrix["b", "97.5%"])
+    cov_dose[i, "c"] <- (true_dose["c"] >= ci_matrix["c", "2.5%"] && 
+                         true_dose["c"] <= ci_matrix["c", "97.5%"])
+    cov_dose[i, "d"] <- (true_dose["d"] >= ci_matrix["d", "2.5%"] && 
+                         true_dose["d"] <= ci_matrix["d", "97.5%"])
+    cov_dose[i, "e"] <- (true_dose["e"] >= ci_matrix["e", "2.5%"] && 
+                         true_dose["e"] <= ci_matrix["e", "97.5%"])
+  }
+  
+  cov_vec <- colMeans(cov_dose, na.rm = TRUE)
+  
+  for (par in names(cov_vec)) {
+    if (!is.na(cov_vec[par])) {
+      results_boot <- rbind(results_boot, data.frame(
+        model     = "4-Parameter Logistic",
+        parameter = par,
+        n         = n,
+        coverage  = cov_vec[par],
+        stringsAsFactors = FALSE
+      ))
+    }
+  }
+}
+```

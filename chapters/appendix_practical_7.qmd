@@ -1,0 +1,137 @@
+# Robust Efficiency Simulation {#sec-robust-efficiency}
+
+The simulation does the following:
+
+1.  Loop over contamination rates from 0 % to 30 %.\
+2.  For each rate, repeat 100 Monte-Carlo draws:\
+3.  simulate a clean exponential-decay sample,\
+4.  add large noise to the chosen fraction of points,\
+5.  fit both NLS and MM, and record each method’s mean-squared error.\
+6.  Average the errors across repeats for every rate.\
+7.  Plot the averages on a log-10 scale so the two curves (NLS in grey, MM in black) reveal how error grows with contamination.
+
+```{r}
+#| label: fig-efficiency-sim
+#| fig-cap: "Mean-squared error for NLS and MM estimates as contamination increases"
+#| echo: true
+#| eval: false
+library(robustbase)
+library(ggplot2)
+set.seed(123)
+contam   <- seq(0, 0.30, 0.05)        # bad points
+n_rep    <- 100                       # Monte-Carlo repeats
+bounds_l <- c(a = 0,  b = 0, c = -5)
+bounds_u <- c(a = 20, b = 2, c =  5)
+mse_tbl <- data.frame()
+
+for (alpha in contam) {
+  mse_nls <- mse_mm <- numeric(n_rep)
+
+  for (i in seq_len(n_rep)) {
+    x <- runif(50, 0, 5)
+    y <- 10 * exp(-0.5 * x) + 1 + rnorm(50, 0, 0.3)
+
+    k <- floor(50 * alpha)            
+    if (k > 0) {
+      idx <- sample(50, k)
+      y[idx] <- y[idx] + rnorm(k, 0, 5)
+    }
+
+    dat <- data.frame(x, y)
+
+    ## NLS  --------------------------------------------------------------
+    nls_fit <- try(
+      nls(y ~ a * exp(-b * x) + c,
+          dat,
+          start     = list(a = 8, b = 0.4, c = 0.5),
+          algorithm = "port",
+          lower     = bounds_l,
+          upper     = bounds_u),
+      silent = TRUE)
+
+    if (!inherits(nls_fit, "try-error"))
+      mse_nls[i] <- mean((coef(nls_fit) - c(10, 0.5, 1)) ^ 2)
+    else
+      mse_nls[i] <- NA_real_
+
+    ## MM  --------------------------------------------------------------
+    mm_fit <- suppressWarnings(
+      nlrob(y ~ a * exp(-b * x) + c,
+            dat,
+            lower  = bounds_l,
+            upper  = bounds_u,
+            method = "MM"))
+
+    mse_mm[i] <- mean((coef(mm_fit) - c(10, 0.5, 1)) ^ 2)
+  }
+
+  mse_tbl <- rbind(mse_tbl,
+                   data.frame(Contam = alpha, Method = "NLS",
+                              MSE = mean(mse_nls, na.rm = TRUE)),
+                   data.frame(Contam = alpha, Method = "MM",
+                              MSE = mean(mse_mm)))
+}
+
+ggplot(mse_tbl, aes(Contam, MSE, colour = Method)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  scale_y_log10() +
+  scale_colour_manual(values = c(NLS = "grey", MM = "black")) +
+  theme_classic() +
+  labs(x = "Contamination fraction",
+       y = "Mean squared error (log10 scale)")
+```
+
+# Uncertainty Comparison {#sec-uncertainty-quant}
+
+```{r}
+#| label: uncertainty-comparison
+#| eval: false
+
+test_ages <- c(500, 1000, 1500)
+results <- matrix(NA, nrow = length(test_ages), ncol = 4)
+colnames(results) <- c("Age", "Pooled_Width", "Mixed_Width", "Width_Ratio")
+
+# pooled NLS pieces
+cf        <- coef(nls_pooled)
+V_nls     <- vcov(nls_pooled)
+sig2_nls  <- deviance(nls_pooled) / df.residual(nls_pooled)
+df_nls    <- df.residual(nls_pooled)
+
+# NLME pieces 
+beta       <- fixef(nlme_fit)
+Vb         <- vcov(nlme_fit)
+tau2       <- as.numeric(VarCorr(nlme_fit)["Asym", "Variance"])  # var(b_Asym)
+sig2_nlme  <- nlme_fit$sigma^2
+
+# logistic mean and gradient
+f <- function(t, Asym, xmid, scal) Asym / (1 + exp((xmid - t)/scal))
+grad <- function(t, Asym, xmid, scal) {
+  z <- (xmid - t)/scal
+  g <- 1 / (1 + exp(z))
+  c(
+    g,                              # d/dAsym
+    -(Asym/scal) * g * (1 - g),    # d/dxmid
+    (Asym * z / scal) * g * (1 - g) # d/dscal
+  )
+}
+
+for (i in seq_along(test_ages)) {
+  t <- test_ages[i]
+
+  g_nls <- grad(t, cf["Asym"], cf["xmid"], cf["scal"])
+  se_pred_nls <- sqrt(as.numeric(t(g_nls) %*% V_nls %*% g_nls) + sig2_nls)
+  w_nls <- 2 * qt(0.975, df_nls) * se_pred_nls
+
+  g_mx  <- grad(t, beta["Asym"], beta["xmid"], beta["scal"])
+  var_mean <- as.numeric(t(g_mx) %*% Vb %*% g_mx)
+  var_re   <- (g_mx[1]^2) * tau2
+  se_pred_nlme <- sqrt(var_mean + var_re + sig2_nlme)
+  w_nlme <- 2 * qnorm(0.975) * se_pred_nlme
+
+  results[i, ] <- c(t, w_nls, w_nlme, w_nlme / w_nls)
+}
+
+print(round(results, 2))
+
+```

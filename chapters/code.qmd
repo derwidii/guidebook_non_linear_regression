@@ -1,0 +1,12 @@
+# Code {.unnumbered}
+
+Throughout this thesis, the following coding conventions are used:
+
+-   **Programming Language**: All analyses are implemented exclusively in R.
+-   **Base R Preference**: Base R functions are used whenever possible to emphasize fundamental concepts and reduce dependencies.
+-   **Packages**: Core fitting uses `stats::nls`. We also use `minpack.lm::nlsLM` (Levenberg–Marquardt), `nls2` for starting values, `nlstools` for diagnostics and `nlsBoot`, `robustbase` for robust fits, `nlme` for mixed-effects, and **ggplot2** for plots.
+-   **Code Integration**: Since this thesis serves as a practical guidebook, R code is embedded directly within the main text following the theoretical concepts.
+-   **Complex Code**: Longer code blocks for advanced analyses are moved to the Appendix to maintain readability.
+-   **Plot Code**: Code for generating figures is hidden (`echo = FALSE`) as visualization is not the primary focus of this work.
+- **Reproducibility & transparency**: This thesis has been written in Quarto. The complete project—including all code, simulation scripts, and configuration to reproduce every figure, table, and result—is available in the [public GitHub repository](https://github.com/derwidii/guidebook_non_linear_regression). The book can be rendered end-to-end from a clean environment.
+

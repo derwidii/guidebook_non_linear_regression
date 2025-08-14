@@ -1,0 +1,9 @@
+# Transform-Both-Sides Mathematics {#sec-transform-both-sides}
+
+The transform-both-sides approach differs fundamentally from standard Box-Cox transformation. For standard Box-Cox, we transform only the response:
+$$g_{\lambda}(y_i) = \beta_0 + \beta_1 x_i + \cdots + \epsilon_i$$
+
+For transform-both-sides in nonlinear regression:
+$$g_{\lambda}(y_i) = g_{\lambda}(f(\mathbf{x}_i, \boldsymbol{\beta})) + \epsilon_i^*$$
+
+This maintains the nonlinear structure while stabilizing variance, though the error term $\epsilon_i^*$ has different properties than the original $\epsilon_i$.

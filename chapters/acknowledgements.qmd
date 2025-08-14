@@ -1,0 +1,9 @@
+# Acknowledgements {.unnumbered}
+
+I would like to take this opportunity to express my sincere gratitude to the people who have supported me throughout my studies and the completion of this thesis.
+
+First and foremost, I want to thank my supervisor, Lukas Meier. His guidance and support were invaluable. He was always there for me, no matter when I had questions or what worries I was facing. This level of dedication is not at all common for a supervisor, and I am incredibly grateful for his mentorship.
+
+I am also deeply indebted to my friends who have been a constant source of support and motivation. I want to thank Jan, who served as a crucial mentor in the early stages of my academic journey, setting me on the right path. My heartfelt thanks go to Mathias; his help and encouragement during my master's were instrumental, and he was a key reason I persevered. To Claudio for his constant support. And to my friend Calvin, thank you for your unwavering support throughout this entire journey.
+
+Finally, I want to express my deepest gratitude to my dad. His constant support and encouragement from the very beginning of my studies have been the foundation upon which all of this was built.

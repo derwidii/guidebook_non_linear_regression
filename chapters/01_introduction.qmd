@@ -1,0 +1,324 @@
+---
+title: "Introduction"
+bibliography: references.bib
+---
+
+```{r, echo = FALSE}
+source("setup.R")
+```
+
+## Motivation and Objectives {#sec-motivation}
+
+In an era where data-driven decision making dominates every sector—from pharmaceutical development to ecological monitoring, from enzyme kinetics to economic forecasting—the ability to model complex relationships has achieved greater importance. While linear models have served as the workhorses of statistical analysis for decades, many real-world phenomena exhibit inherently nonlinear behaviour that linear or polynomial models cannot adequately capture. This is where nonlinear regression becomes essential.
+
+Furthermore, nonlinear regression signifies a transition toward mechanistic modeling, using mathematical forms grounded in scientific theory. Unlike purely empirical approaches, these models provide insight into the underlying processes through parameters with direct physical, biological, or economic meaning [@obrien_silcox_2024].
+
+To build intuition, three real-world examples are discussed in the following. Note that the data is simulated and not taken from a real world dataset. In later applications, e.g. @sec-gompert-growth-example, data is taken from real world dataset. In these introductory examples, the goal is not to analyze the data in depth but to gain an initial understanding of the topic.
+
+### Biology: Gompertz Growth Model {#sec-intro-gompertz}
+
+Growth processes in living organisms rarely follow simple linear trajectories. The **Gompertz model** exemplifies how nonlinear regression captures the complex dynamics of biological systems. This model has found widespread application in growth studies and population dynamics, where initial exponential growth gradually decelerates as systems approach their carrying capacity. The Gompertz model was coined by @wright1926 and first applied by @medawar1940 to model the growth of a chicken's heart.
+
+A form that appears frequently in the literature states [@tjørve2017, p. 5] :
+
+$$
+W(t) = A\,\exp\!\bigl\{-\exp\!\bigl[-k_G\,(t - T_i)\bigr]\bigr\}
+$$ {#eq-reparameter}
+
+where:
+
+-   $A$ – asymptotic size (the value that $W(t)$ approaches as $t \to \infty$);
+-   $k_G$ – Gompertz growth-rate constant (controls how steeply the curve rises);
+-   $T_i$ – inflection time, i.e. the time at which the absolute growth rate peaks.
+
+```{r}
+#| label: fig-gompertz
+#| echo: false
+#| fig-height: 3
+#| fig-cap: "Gompertz curve in the $T_i$‑form fitted to simulated data."
+#| message: false
+#| warning: false
+
+library(ggplot2)
+set.seed(123)
+
+# True parameters (T_i‑form)
+A_true  <- 100      # asymptote
+kG_true <- 0.30     # growth‑rate coefficient
+Ti_true <- 10       # time at inflection
+
+gompertz_Ti <- function(t, A, kG, Ti) {
+  A * exp(-exp(-kG * (t - Ti)))
+}
+
+# Simulate observations
+
+time <- seq(0, 30, by = 0.5)
+y_obs <- gompertz_Ti(time, A_true, kG_true, Ti_true) + rnorm(length(time), sd = 2.5)
+
+df_g <- data.frame(time, y = y_obs)
+
+# Fit model via nls
+fit_g <- nls(
+  y ~ gompertz_Ti(time, A, kG, Ti),
+  data = df_g,
+  start = list(A = max(y_obs), kG = 0.2, Ti = mean(time))
+)
+coefs_g <- coef(fit_g)
+
+# Prepare predictions
+
+time_pred <- seq(min(time), max(time), length.out = 200)
+df_pred <- data.frame(
+  time = time_pred,
+  y    = gompertz_Ti(time_pred, coefs_g["A"], coefs_g["kG"], coefs_g["Ti"])
+)
+
+
+library(grid)  # for arrow()
+
+
+A_hat  <- unname(coefs_g["A"])
+Ti_hat <- unname(coefs_g["Ti"])
+y_Ti   <- gompertz_Ti(Ti_hat, coefs_g["A"], coefs_g["kG"], coefs_g["Ti"])
+
+col_gray <- if (exists("thesis_palette")) as.character(thesis_palette["gray"]) else "grey40"
+
+ggplot(df_g, aes(x = time, y = y)) +
+  # Data + fit
+  geom_point(shape = 21, size = 2, fill = "white", color = "black", stroke = 0.5) +
+  geom_line(data = df_pred, aes(x = time, y = y), linewidth = 1, color = "black") +
+  # Guides for A and Ti
+  geom_hline(yintercept = A_hat, linetype = "dashed",
+             linewidth = 0.6, color = col_gray) +
+  geom_vline(xintercept = Ti_hat, linetype = "dotted",
+             linewidth = 0.6, color = col_gray) +
+  # Headroom so the asymptote label sits above the line
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.15))) +
+  labs(
+    x = expression("Time " (italic(t))),
+    y = expression("Population size " (italic(W(t))))
+  ) +
+  # Asymptote: label further left and up + arrow to dashed line
+  annotate("label",
+           x = max(df_g$time) - 6.0,
+           y = A_hat + 9,
+           label = "Asymptote~(italic(A))", parse = TRUE,
+           family = "serif", fontface = "italic",
+           fill = "white", label.size = 0, color = col_gray) +
+  annotate("segment",
+           x = max(df_g$time) - 4.5, xend = max(df_g$time) - 0.6,
+           y = A_hat + 7.0,  yend = A_hat + 0.2,
+           arrow = grid::arrow(length = grid::unit(3, "mm")),
+           colour = col_gray) +
+  # Inflection: parse-safe label + short arrow to (Ti, f(Ti))
+  annotate("label",
+           x = Ti_hat + 3, y = y_Ti - 18,
+           label = "Inflection~(italic(T)[i])", parse = TRUE,
+           family = "serif", fontface = "italic",
+           fill = "white", label.size = 0, color = col_gray) +
+  annotate("curve",
+           x = Ti_hat + 2.3, xend = Ti_hat,
+           y = y_Ti - 16.5, yend = y_Ti,
+           curvature = 0.2,
+           arrow = grid::arrow(length = grid::unit(3, "mm")),
+           colour = col_gray) +
+  theme_thesis(base_family = "serif") +
+  theme(
+    panel.background = element_rect(fill = "white", colour = NA),
+    plot.background  = element_rect(fill = "white", colour = NA),
+    panel.grid.major.y = element_line(colour = "#E6E6E6", linewidth = 0.5),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor   = element_blank()
+  )
+```
+
+@fig-gompertz shows the sigmoidal trajectory: rapid growth while $t < T_i$, maximum absolute growth rate at $t = T_i$, and a gradual approach toward the asymptote $A$ once resources become limiting. Intuitively, think of $A$ as the biological ceiling, $k_G$ as how quickly the system rushes toward that ceiling (larger $k_G$ $\Rightarrow$ a steeper early rise), and $T_i$ as the timing of the growth spurt. In the classic chicken-heart example, size increases slowly at first, surges around $T_i$ during rapid development, and then levels off as maturation caps growth near $A$.
+
+### Economic Growth: Exponential Models {#sec-intro-exponential}
+
+Economic phenomena frequently exhibit compound growth, where the rate of change is proportional to the current value. **Exponential growth models** capture this fundamental property of many economic processes. Think of a simple exponential growth model, similar to @ritz_streibig_2008 [p. 31]:
+
+$$
+y(t) = y_0 e^{rt}
+$$ {#eq-exponential}
+
+where:
+
+-   $y(t)$ represents the value at time $t$ (e.g., GDP, investment returns)
+-   $y_0$ denotes the initial value
+-   $r$ is the continuous growth rate
+
+```{r}
+#| label: fig-exponential
+#| echo: false
+#| fig-height: 3
+#| fig-cap: "Comparison of exponential growth at different rates versus linear growth"
+#| message: false
+#| warning: false
+# Data generation (same as before)
+time <- seq(0, 30, length.out = 200)
+df_e <- data.frame(
+  time = rep(time, 3),
+  y = c(exp(0.05 * time), exp(0.10 * time), exp(0.15 * time)),
+  rate = factor(rep(c("5%", "10%", "15%"), each = length(time)),
+                levels = c("5%", "10%", "15%"))
+)
+df_lin <- data.frame(time, y = 1 + 0.10 * time)
+# Revised Plot
+ggplot(df_e, aes(x = time, y = y, colour = rate, group = rate)) +
+  geom_line(linewidth = 1) +
+  geom_line(
+    data = df_lin, aes(x = time, y = y),
+    colour = thesis_palette["gray"], linetype = "dashed", linewidth = 0.8,
+    inherit.aes = FALSE
+  ) +
+  scale_colour_manual(
+    name   = "Annual Growth Rate",
+    breaks = c("5%","10%","15%"),
+    values = unname(thesis_palette[c("green","blue","red")])
+  ) +
+  scale_y_continuous(breaks = c(1, 5, 10, 20, 40, 60, 80)) +
+  theme_thesis(base_family = "serif") +
+  theme(panel.grid.major.y = element_line(colour = "#E6E6E6", linewidth = 0.5)) +
+  labs(x = "Time (years)", y = "Relative Value") +
+  annotate("text", x = 20, y = 4, label = "Linear growth",
+           family = "serif", fontface = "italic", colour = thesis_palette["gray"])
+```
+
+As @fig-exponential illustrates, exponential growth compounds: each period’s return applies to an ever-larger base (“interest on interest”). By contrast, linear growth adds a fixed increment each period. Consequently, even modest but sustained differences in constant growth rates cumulate into large differences in levels over long horizons [@jones2013, pp. 10-11] . This compounding mechanism explains why economies (or investments) that grow only slightly faster for extended periods can end up with vastly higher levels than their slower-growing counterparts.
+
+```{=latex}
+\FloatBarrier
+```
+
+### Pharmacology: Dose-Response Relationships {#sec-intro-dose-response}
+
+In pharmaceutical research, understanding how drug effects vary with concentration is fundamental to drug development and therapeutic optimization. The **Hill equation** provides a mechanistic model for these dose-response relationships, capturing the sigmoidal pattern observed in many biological systems [@hill_new_1910, @gesztelyi2012]:
+
+$$
+E = \frac{E_{\max} C^n}{EC_{50}^n + C^n}
+$$ {#eq-hill-standard-known}
+
+where:
+
+-   $E$ represents the observed effect\
+-   $C$ denotes the drug concentration\
+-   $E_{\max}$ is the maximum achievable effect\
+-   $EC_{50}$ is the concentration producing half-maximal effect\
+-   $n$ is the Hill coefficient, indicating cooperativity
+
+```{r}
+#| label: fig-dose-response
+#| echo: false
+#| fig-height: 3
+#| fig-cap: "Hill equation dose-response curves with varying n."
+#| warning: false
+#| message: false
+
+# Data generation (same as before)
+hill <- function(C, Emax, EC50, n) (Emax * C^n) / (EC50^n + C^n)
+conc <- 10^seq(-2, 3, length.out = 200)
+df_d <- data.frame(
+  conc = rep(conc, 3),
+  effect = c(hill(conc, 100, 10, 1),
+             hill(conc, 100, 10, 2),
+             hill(conc, 100, 10, 4)),
+  n = factor(rep(c("n = 1", "n = 2", "n = 4"), each = length(conc)))
+)
+
+# Revised Plot
+# Revised Plot
+ggplot(
+  df_d,
+  aes(x = conc, y = effect, colour = n, group = n)
+) +
+  geom_line(linewidth = 1) +
+  geom_hline(yintercept = 50, linetype = "dotted", color = thesis_palette["gray"]) +
+  geom_vline(xintercept = 10,  linetype = "dotted", color = thesis_palette["gray"]) +
+  scale_x_log10(
+    breaks = c(0.1, 1, 10, 100, 1000),
+    labels = c("0.1", "1", "10", "100", "1000")
+  ) +
+  scale_colour_manual(
+    name   = "Hill Coefficient (n)",
+    breaks = c("n = 1","n = 2","n = 4"),
+    values = unname(thesis_palette[c("green","blue","red")])
+  ) +
+  theme_thesis(base_family = "serif") +
+  theme(panel.grid.major.y = element_line(colour = "#E6E6E6", linewidth = 0.5)) +
+  labs(x = "Drug Concentration (log scale)", y = "Effect (%)") +
+  annotate("text", x = 10,  y = 40, label = expression(EC[50]),
+           family = "serif", fontface = "italic", size = 3.5, vjust = 1) +
+  annotate("text", x = 150, y = 50, label = expression(E[max]/2),
+           family = "serif", fontface = "italic", size = 3.5, hjust = 0)
+
+
+```
+
+@fig-dose-response shows how $n$ shapes the curve. Intuitively, $E_{\max}$ is the ceiling, $EC_{50}$ is the “halfway point,” and $n$ is the steepness knob: when $n=1$ the curve behaves like a dimmer, but as $n$ grows it turns into more of an on/off switch. The transition zone narrows with larger $n$. Clinically, that means tighter titration around $EC_{50}$: small shifts in $C$ can cause large swings in $E$, increasing the risk of under- or overshooting.
+
+```{=latex}
+\FloatBarrier
+```
+
+### Practical Focus and Thesis Objectives
+
+This thesis bridges the gap between nonlinear regression theory and its practical application. It takes an approach similar to the work of @ritz_streibig_2008, combining essential theory with hands-on implementation in R. However, the statistical software landscape has evolved significantly since its publication. Many powerful new packages have emerged, while some older ones, such as `nlrwr`, have been removed from CRAN. This work aims to bridge this gap, providing an updated and comprehensive guide for the modern practitioner.
+
+The overarching objectives are to:
+
+1.  **Introduce nonlinear regression** by presenting theory alongside practical R implementations.
+2.  **Provide comprehensive guidance** from initial model selection and parameter estimation to diagnostic assessment and inference.
+3.  **Demonstrate best practices** through real-world examples spanning biology, pharmacology, and other fields.
+4.  **Address common challenges**, including starting value selection, convergence issues, and model comparison.
+5.  **Explore advanced topics** such as robust methods, penalized estimation, and modern computational approaches.
+
+## Research Questions {.unnumbered}
+
+This thesis is structured around five research questions that will be addressed throughout the thesis:
+
+#### RQ1 — When is nonlinear regression adequate? {#rq1}
+
+Identify conditions under which linear or polynomial models are inadequate. Specify data features and theoretical constraints that justify intrinsically nonlinear forms.
+
+#### RQ2 — How are parameters estimated effectively? {#rq2}
+
+Evaluate optimization algorithms for robustness to poor initial values. Compare initialization strategies for reliable and efficient convergence.
+
+#### RQ3 — How is model adequacy established? {#rq3}
+
+Apply residual-based diagnostics to detect heteroscedasticity, non-normality, influence, and misspecification. Verify that parameter estimates satisfy scientific plausibility and admissible bounds.
+
+#### RQ4 — How is statistical inference made credible? {#rq4}
+
+Assess Wald, profile, and bootstrap intervals under finite-sample conditions. Formulate hypothesis tests and prediction intervals that reflect parameter and error uncertainty.
+
+#### RQ5 — Why prefer mechanistic over empirical models? {#rq5}
+
+Determine when theory-based models provide advantages over flexible empirical alternatives. Emphasize parameter interpretability and coherence with domain knowledge.
+
+## Structure of the Thesis {.unnumbered}
+
+The thesis is structured in a consistent manner: theoretical foundations are followed by practical implementation, ensuring readers understand both the "why" and the "how" of each technique. The following topics will be discussed:
+
+**Chapter 2: Fundamentals of Nonlinear Regression.**\
+Presents the mathematical framework and distinguishes intrinsically nonlinear from transformable models. Clarifies when transformations are adequate and when they are not. Addresses RQ1 and RQ5.
+
+**Chapter 3: Parameter Estimation.**\
+Develops nonlinear least squares and related likelihood formulations. Compares Gauss–Newton, Levenberg–Marquardt, and PORT. Reviews initialization via domain knowledge, grid search, linearization, and self-starting functions. Addresses RQ2.
+
+**Chapter 4: Model Diagnostics.**\
+Implements residual diagnostics for variance structure, distributional shape, influence, and structural fit. Assesses parameter plausibility and imposes meaningful bounds. Considers remedial transformations, including Box–Cox. Addresses RQ3.
+
+**Chapter 5: Model Inference.**\
+Constructs confidence intervals using Wald, profile, and bootstrap methods. Conducts hypothesis tests and derives prediction intervals. Compares nested and non-nested specifications. Addresses RQ4.
+
+**Chapter 6: Applications.**\
+Presents case studies in biology (Gompertz), economics (Cobb–Douglas), and pharmacology (Hill). Executes specification, estimation, diagnostics, and inference as a unified workflow. Addresses RQ1–RQ5.
+
+**Chapter 7: Further Topics.**\
+Examines robust regression for contamination, penalization in higher-dimensional settings, and computational advances (automatic differentiation and parallelization). Introduces neural networks as flexible nonlinear models. Addresses RQ2, RQ3, and RQ5.
+
+**Chapter 8: Conclusion and Outlook.**\
+Synthesizes findings across RQ1–RQ5. States limitations and outlines directions for future research.

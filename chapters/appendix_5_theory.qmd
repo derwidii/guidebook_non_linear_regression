@@ -1,0 +1,97 @@
+# Joint Confidence Regions {#sec-joint-confidence-regions}
+
+A common approach to define such a region is to find all parameter sets $\boldsymbol{\beta}$ that don't increase the RSS (RSS) too much compared to the best-fit estimate $\hat{\boldsymbol{\beta}}$. This is often formulated using an F-test statistic, defining the region as all $\boldsymbol{\beta}$ satisfying, such as in Beale's method [@baty_etal_2015, p. 12]:
+
+$$
+\text{RSS}(\boldsymbol{\beta}) \leq \text{RSS}(\hat{\boldsymbol{\beta}}) \left(1 + \frac{p}{n-p}F_{p,n-p,\alpha}\right) 
+$$ {#eq-beale-criterion}
+
+where $p$ is the number of parameters, $n$ is the number of data points, and $F_{p,n-p,\alpha}$ is the critical value from the F-distribution.
+
+For single parameter $\beta_j$:
+
+$$\text{RSS}_{profiled}(\beta_j) \leq \text{RSS}(\hat{\beta}_j) \left(1 + \frac{1}{n-p}F_{1,n-p,\alpha}\right)$$ {#eq-beale-single}
+
+This method examines how much the RSS increases when parameters deviate from their optimal values. Unlike Wald regions that assume elliptical shapes, Beale's method captures the actual nonlinear surface—revealing banana-shaped or asymmetric regions when parameters interact strongly. Note this bound is approximate for nonlinear models, becoming exact only as sample size approaches infinity.
+
+While theoretically superior to methods that assume simple elliptical shapes (like Wald regions), finding and interpreting these likelihood-based regions comes with difficulty, as noted by @bates_watts_1988 [pp.200-204].
+
+1.  **Complex Geometry:** The primary issue is that these regions are often not simple, closed ellipses. As seen in poorly-behaved models, the contours can be hyperbolic and even unbounded, stretching to infinity. This happens when the model becomes insensitive to changes in a parameter, making it impossible to establish a finite confidence bound. The resulting region is difficult to interpret and may not be useful for inference.
+
+2.  **Computational Burden:** Actually plotting these regions is a significant challenge. For more than two parameters ($p>2$), the "curse of dimensionality" makes it computationally explosive to evaluate the RSS on a P-dimensional grid to find the boundary. The process is expensive and requires repeated trial-and-error to even find the right plot limits.
+
+3.  **Visualization Failures:** Even with modern software, standard contouring algorithms can struggle with the long, thin, or disjointed shapes that arise in nonlinear models, potentially producing misleading plots.
+
+Lastly, when nonlinearity is mild (as quantified by Beale's curvature measures), Wald regions may suffice with lower computational cost.
+
+# Alternative Profile-Likelihood Methods for Dose-Response Curves {#sec-appendix-alternative-profile}
+
+@ren2019 propose a specialized algorithm for constructing pointwise profile-likelihood confidence intervals specifically tailored to dose-response curves. Their method addresses computational challenges in profiling over the entire curve rather than individual parameters.
+
+The algorithm proceeds as follows:
+
+1. **Reparameterize** the model so expected response $\mu(d^*)$ at each dose $d^*$ becomes the profiling parameter
+2. **Define dose grid** $d^*_1,\dots,d^*_m$ covering the range of interest
+3. For each $d^*_k$:
+   - Use **bisection search** on $p^*$, calling a profiling routine that fixes $p^*$ and re-fits remaining parameters
+   - **Seed search bounds** from neighboring dose-points to exploit monotonicity
+   - Fall back on **crude grid search** when near 0% or 100% response to ensure convergence
+4. **Assemble** lower/upper limits across grid to form confidence band
+
+This approach delivers fully profile-likelihood-based, transformation-invariant pointwise intervals for the dose-response curve. The method's advantages include proper handling of asymmetric uncertainty and invariance to model parameterization. However, the computational cost scales with the number of grid points and model complexity, making it most suitable for detailed analysis of critical dose-response relationships rather than routine inference.
+
+# Prediction Intervals Details {#sec-prediction-interval-details}
+
+## Variance Decomposition
+
+The total prediction variance arises from two sources: the uncertainty in estimating the mean response and the inherent variability of a new observation [@huet2004, pp. 137–138]. For a prediction at $x_0$, write $\hat{Y}_0 = f(x_0,\hat{\boldsymbol{\beta}})$. The variance of the prediction error $(\hat{Y}_0 - Y_0)$ decomposes as [@seber2003, p. 132]:
+$$
+\operatorname{Var}[\hat{Y}_0 - Y_0] \;=\; \operatorname{Var}[\hat{Y}_0] \;+\; \operatorname{Var}[Y_0].
+$$
+
+1. **Parameter uncertainty.** $\operatorname{Var}[\hat{Y}_0]$ reflects uncertainty in $\hat{\boldsymbol{\beta}}$.  
+2. **Observation variance.** $\operatorname{Var}[Y_0]=\sigma^2$ under homoscedastic normal errors.
+
+## Construction Methods
+
+Two approaches balance accuracy and computational cost.
+
+### Analytical (closed-form) intervals
+
+- **Linear model (exact).** If $f(x,\boldsymbol{\beta})=\mathbf{x}^\top\boldsymbol{\beta}$ with design vector $\mathbf{x}_0$, then
+  $$
+  \operatorname{Var}[\hat{Y}_0] \;=\; \sigma^2\,\mathbf{x}_0^\top (X^\top X)^{-1}\mathbf{x}_0 \;\equiv\; \sigma^2 v_0,
+  $$
+  yielding the **exact** $100(1-\alpha)\%$ prediction interval:
+  $$
+  \hat{Y}_0 \;\pm\; t_{n-p,\,1-\alpha/2}\; S\,\sqrt{1+v_0},
+  $$
+  where $S^2=\mathrm{RSS}(\hat{\boldsymbol{\beta}})/(n-p)$.
+
+- **Nonlinear model (first-order approximation).** Let $J$ be the $n\times p$ Jacobian with rows $J_{i\cdot}=\partial f(x_i,\boldsymbol{\beta})/\partial\boldsymbol{\beta}\big|_{\hat{\boldsymbol{\beta}}}$, and let $j_0=\partial f(x_0,\boldsymbol{\beta})/\partial\boldsymbol{\beta}\big|_{\hat{\boldsymbol{\beta}}}$. A first-order delta-method approximation gives
+  $$
+  \operatorname{Var}[\hat{Y}_0]\;\approx\;\sigma^2\, j_0^\top (J^\top J)^{-1} j_0 \;\equiv\; \sigma^2 g_0,
+  $$
+  so an **approximate** prediction interval is
+  $$
+  f(x_0,\hat{\boldsymbol{\beta}})\;\pm\; t_{n-p,\,1-\alpha/2}\; S\,\sqrt{1+g_0}.
+  $$
+
+### Monte Carlo (simulation) intervals
+
+This approach avoids relying on linearization and is well-suited to nonlinear models [@dietze2017, pp. 33, 153].
+
+1. **Draw parameter realizations.** Either (a) use the asymptotic normal approximation
+   $$
+   \boldsymbol{\beta}^{(k)} \sim \mathcal{N}\!\big(\hat{\boldsymbol{\beta}},\; S^2 (J^\top J)^{-1}\big),
+   $$
+   or (b) use a **parametric bootstrap**: simulate $y_i^{*(k)}=f(x_i,\hat{\boldsymbol{\beta}})+\varepsilon_i^{(k)}$ with $\varepsilon_i^{(k)}\sim\mathcal{N}(0,S^2)$, refit to get $\hat{\boldsymbol{\beta}}^{*(k)}$, and set $\boldsymbol{\beta}^{(k)}=\hat{\boldsymbol{\beta}}^{*(k)}$.
+
+2. **Generate predictive draws.** For each $\boldsymbol{\beta}^{(k)}$, sample
+   $$
+   y_0^{(k)} = f(x_0,\boldsymbol{\beta}^{(k)}) + \varepsilon_0^{(k)},\quad \varepsilon_0^{(k)}\sim \mathcal{N}(0,S^2).
+   $$
+
+3. **Form the interval.** Use the empirical $(\alpha/2,\,1-\alpha/2)$ quantiles of $\{y_0^{(k)}\}$ as the prediction limits.
+
+This simulation-based method is more computationally intensive but typically more reliable for strongly nonlinear $f(\cdot)$, capturing asymmetry and curvature that first-order formulas may miss.

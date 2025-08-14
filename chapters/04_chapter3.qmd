@@ -1,0 +1,369 @@
+---
+title: "Model Diagnostics"
+---
+
+Nonlinear regression models rely on assumptions about error structure and functional form. When violated, these assumptions compromise parameter estimates, standard errors, and scientific conclusions. This chapter develops diagnostic procedures to detect violations through residual analysis, enabling corrective action before inference.
+
+We examine four fundamental assumptions for models $y_i = f(\mathbf{x}_i,\boldsymbol{\beta}) + \epsilon_i$: 
+
+- **correct specification of $f$** so residuals fluctuate randomly around zero with no systematic structure (ii) - **homoscedasticity** $\operatorname{Var}(\epsilon_i)=\sigma^2$, meaning residual spread is roughly constant across fitted values 
+- **normality** $\epsilon_i\sim N(0,\sigma^2)$, which justifies standard Wald-type standard errors and intervals
+- *independence** $\operatorname{Cov}(\epsilon_i,\epsilon_j)=0$ for $i\neq j$, ruling out serial correlation.
+
+Practical diagnostics include residuals-versus-fitted, Q–Q plots, and residual ACF/lag plots. Typical remedies are re-specifying $f$ or transforming variables, variance-stabilizing transforms or weighted/heteroscedastic models, robust methods or bootstrap inference, and explicit correlation structures.
+
+
+```{=latex}
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Theory}
+\thispagestyle{empty}
+
+\vspace*{\fill}
+\begin{center}
+  \Huge\bfseries Theory
+\end{center}
+\vspace*{\fill}
+
+\clearpage
+```
+
+## Theoretical Foundations
+
+### Model Assumptions and Their Consequences
+
+Nonlinear regression assumes $y_i = f(\mathbf{x}_i, \boldsymbol{\beta}) + \epsilon_i$ where $f$ is a known nonlinear function, $\boldsymbol{\beta}$ represents parameters, and $\epsilon_i$ are random errors, see @eq-formal-nonlinear in @sec-introd-nonlinear-regression. Four critical assumptions determine validity [@seber_wild_2003, pp. 10, 21; @bates_watts_1988, pp. 5, 24-26]:
+
+**1. Correct Model Specification**: If $E[y_i \mid \mathbf{x}_i] = f(\mathbf{x}_i; \boldsymbol{\beta}_0)$ for some true parameter $\boldsymbol{\beta}_0$ and standard identifiability and regularity conditions hold, the estimator $\hat{\boldsymbol{\beta}}$ is consistent and asymptotically normal. Under misspecification, $\hat{\boldsymbol{\beta}}$ converges to a pseudo-true value $\boldsymbol{\beta}^{\ast} \neq \boldsymbol{\beta}_0$, inducing systematic residual patterns. In contrast to linear models, where OLS is finite-sample unbiased under correct specification, nonlinear models lack this guarantee due to the nonlinearity in parameters.
+
+**2. Homoscedasticity**: $\operatorname{Var}(\epsilon_i\mid\mathbf{x}_i)=\sigma^2$ yields asymptotic efficiency of (unweighted) NLS and validates the usual covariance estimator. With heteroscedasticity, NLS remains consistent (if $f$ is correct) but standard errors are wrong; use sandwich (robust) SEs.
+
+**3. Normality**: $\epsilon_i\sim N(0,\sigma^2)$ makes NLS coincide with MLE and supports likelihood-based inference. Without normality, point estimates are still consistent under regularity, but Wald/likelihood tests rely on large-sample approximations.
+
+**4. Independence**: $\text{Cov}(\epsilon_i, \epsilon_j) = 0$ for $i \neq j$ ensures correct standard error estimation. Positive dependence typically leads to underestimated uncertainty, negative dependence to overestimation.
+
+The assumptions above are assumptions to be assessed with diagnostics, they differ from the regularity conditions in @sec-regularity-conditions, which justify asymptotic theory and algorithms.
+
+Figure \ref{fig-diagnostic-framework} presents the comprehensive framework connecting assumptions, diagnostics, and remedial measures.
+
+```{=latex}
+
+\begin{figure}
+\centering
+\begin{tikzpicture}[
+  scale=0.75, transform shape,
+  every node/.style={transform shape},
+  titlebox/.style={rectangle, draw, thick, fill=blue!10, text width=13cm, minimum height=1.2cm, align=center, font=\large\bfseries},
+  assumptionbox/.style={rectangle, draw, thick, fill=green!10, text width=3.8cm, minimum height=1cm, align=center, font=\normalsize\bfseries},
+  diagnosticbox/.style={rectangle, draw, thin, fill=yellow!10, text width=3.6cm, minimum height=0.8cm, align=center, font=\small},
+  remedybox/.style={rectangle, draw, thin, fill=red!10, text width=3.6cm, minimum height=0.6cm, align=center, font=\footnotesize\itshape}
+]
+
+% Main title
+\node[titlebox] (title) at (0,0) {Nonlinear Regression Diagnostics Framework};
+
+% Four main assumptions
+\node[assumptionbox] (assumption1) at (-6,-2.2) {Correct Model \\ Specification};
+\node[assumptionbox] (assumption2) at (-2,-2.2) {Constant \\ Variance};
+\node[assumptionbox] (assumption3) at (2,-2.2) {Normal \\ Errors};
+\node[assumptionbox] (assumption4) at (6,-2.2) {Independence};
+
+% Diagnostics for each assumption
+\node[diagnosticbox] (diag1) at (-6,-3.8) {Residuals vs Fitted \\ Residuals vs Predictors};
+\node[diagnosticbox] (diag2) at (-2,-3.8) {Absolute Residuals \\ Scale-Location Plot};
+\node[diagnosticbox] (diag3) at (2,-3.8) {Q-Q Plot \\ Shapiro-Wilk Test};
+\node[diagnosticbox] (diag4) at (6,-3.8) {Lag Plot \\ Run-Tests};
+
+% Remedies for each assumption
+\node[remedybox] (remedy1) at (-6,-5.2) {Alternative Forms \\ Piecewise models \\ Polynomial Terms};
+\node[remedybox] (remedy2) at (-2,-5.2) {Transformations \\ Weighted Regression \\ Variance Modeling};
+\node[remedybox] (remedy3) at (2,-5.2) {Box-Cox Transform \\ Robust Methods \\ Alternative Errors};
+\node[remedybox] (remedy4) at (6,-5.2) {Spatial Models \\ Time Trends \\ GLS Methods};
+
+% Mathematical expressions
+\node[align=center, font=\footnotesize] at (-6,-6.4) {$y_i = f(\mathbf{x}_i, \boldsymbol{\beta}) + \epsilon_i$};
+\node[align=center, font=\footnotesize] at (-2,-6.4) {$\text{Var}(\epsilon_i) = \sigma^2$};
+\node[align=center, font=\footnotesize] at (2,-6.4) {$\epsilon_i \sim N(0,\sigma^2)$};
+\node[align=center, font=\footnotesize] at (6,-6.4) {$\text{Cov}(\epsilon_i, \epsilon_j) = 0$};
+
+% Connections
+\draw[thick] (title.south) -- (0,-1.3);
+\draw[thick] (0,-1.3) -- (-6,-1.3);
+\draw[thick] (0,-1.3) -- (-2,-1.3);
+\draw[thick] (0,-1.3) -- (2,-1.3);
+\draw[thick] (0,-1.3) -- (6,-1.3);
+
+\draw[->] (-6,-1.3) -- (assumption1.north);
+\draw[->] (-2,-1.3) -- (assumption2.north);
+\draw[->] (2,-1.3) -- (assumption3.north);
+\draw[->] (6,-1.3) -- (assumption4.north);
+
+\draw[->] (assumption1.south) -- (diag1.north);
+\draw[->] (assumption2.south) -- (diag2.north);
+\draw[->] (assumption3.south) -- (diag3.north);
+\draw[->] (assumption4.south) -- (diag4.north);
+
+\draw[->] (diag1.south) -- (remedy1.north);
+\draw[->] (diag2.south) -- (remedy2.north);
+\draw[->] (diag3.south) -- (remedy3.north);
+\draw[->] (diag4.south) -- (remedy4.north);
+
+% Labels
+\node[rotate=90, font=\scriptsize] at (-8.25,-2.2) {Assumptions};
+\node[rotate=90, font=\scriptsize] at (-8.25,-3.8) {Diagnostics};
+\node[rotate=90, font=\scriptsize] at (-8.25,-5.2) {Remedies};
+
+% Process flow indicator
+\draw[ultra thick, ->, gray!50] (-8.5,-2.2) -- (-8.5,-5.2);
+
+\end{tikzpicture}
+\caption{Comprehensive framework for nonlinear regression diagnostics.}
+\label{fig-diagnostic-framework}
+\end{figure}
+```
+
+### Diagnosing Model Specification
+
+#### Residual-Based Detection
+
+Residuals $\hat{r}_i = y_i - f(\mathbf{x}_i, \hat{\boldsymbol{\beta}})$ reveal misspecification through systematic patterns when plotted against fitted values $\hat{y}_i = f(\mathbf{x}_i, \hat{\boldsymbol{\beta}})$ [@bates_watts_1988, p. 28; @ritz_streibig_2008, pp. 56-69] Under correct specification, $E[\hat{r}_i|\hat{y}_i] = 0$ produces random scatter. Violations manifest as:
+
+-   **Curvature**: Indicates missing nonlinear terms, quantified by testing $H_0: \beta_2 = 0$ in: $$\hat{r}_i = \beta_0 + \beta_1\hat{y}_i + \beta_2\hat{y}_i^2 + \nu_i$$ {#eq-curvature-test}
+-   **Monotonic trends**: Suggest incomplete parameterization, detected through Spearman correlation between residuals and fitted values
+
+#### Remedial Strategies
+
+**Alternative Functional Forms** replace inadequate models when systematic residual patterns indicate fundamental specification errors:
+
+\- Hormetic models for non-monotonic dose–response: $f(x)= c + \dfrac{d - c + f\,x}{1 + (x/e)^b}$ (Brain–Cousens), which adds a linear hormesis term $f\,x$ to the 4-parameter log-logistic [@ritz2020, pp. 181-182].
+
+\- Asymmetric growth curves: Richards function $f(x) = A(1 + \nu e^{-kx})^{-1/\nu}$ adds shape parameter $\nu$ to logistic growth, allowing inflection point flexibility [@seber_wild_2003, pp. 332-337].
+
+\- Mechanistic models: Incorporate domain knowledge through Arrhenius temperature dependence $k(T) = Ae^{-E_a/RT}$ or Michaelis-Menten kinetics $v = \frac{V_{\max}[S]}{K_m + [S]}$ [@seber_wild_2003 p. 395].
+
+**Model Extension** adds flexibility through additional parameters when residual analysis suggests specific missing components:
+
+\- Polynomial terms: Essentially works as Taylor expansion that approximates smooth deviations as $f(\mathbf{x}, \boldsymbol{\beta}) + \sum_{k=1}^{p} \gamma_k x^k$
+
+\- Interaction effects: Capture synergies via $f(x_1, x_2, \boldsymbol{\beta}) + \gamma x_1 x_2$
+
+\- Piecewise models: Handle discontinuities with $f(\mathbf{x}, \boldsymbol{\beta}) \cdot I(x < c) + g(\mathbf{x}, \boldsymbol{\phi}) \cdot I(x \geq c)$, see e.g. @sec-linear-versus-nonlinear
+
+### Assessing Variance Structure {#sec-assessing-variance-structure}
+
+#### Detecting Heteroscedasticity
+
+Absolute residuals $|\hat{r}_i|$ estimate local spread because $E[|\epsilon_i|] = \sigma\sqrt{2/\pi}$ under normality [@ritz_streibig_2008, p. 65]. A Tukey–Anscombe (residuals vs. fitted) plot helps diagnose variance patterns [@meier2023, pp. 33–35]:
+
+-   **Funnel shape / increasing spread with the mean**: indicates multiplicative variation. In such cases, a logarithmic transformation of the response is appropriate and typically stabilizes the variance.
+
+-   **“U-shaped” pattern**: could signal mean-function misspecification rather than a variance issue. Re-specify the systematic part of the model first. One should not automatically treat this as a hint for a variance-stabilizing transformation [@rönkkö2022, pp. 50, 70-71].
+
+#### Variance Stabilization {#sec-variance-stabilization}
+
+**Power Transformations** exploit the delta method. If $\text{Var}(Y) \propto [E(Y)]^{2\alpha}$, then $\text{Var}(Y^{1-\alpha}) \approx$ constant [@bates_watts_1988, p. 28; @seber_wild_2003, pp. 68-74; @ritz_streibig_2008, pp. 81-82] :
+
+-   Square root ($\alpha = 0.5$): Count data where variance equals mean
+-   Logarithm ($\alpha = 1$): Multiplicative errors with constant coefficient of variation
+-   Box-Cox: Data-driven selection via profile likelihood maximization, see @sec-box-cox-applied and @sec-variance-stab-box-cox
+
+**Weighted Regression** targets $\operatorname{Var}(\epsilon_i)\approx \sigma^2/w_i$ and minimizes $\sum_i w_i\,\hat r_i^2$, with $w_i \approx 1/\widehat{\operatorname{Var}}(\epsilon_i)$. This preserves the original response scale.
+
+-   Estimate weights from residual patterns: $\hat{w}_i = 1/\hat{\sigma}_i^2$
+-   Known weights from theory: $w_i = n_i$ for aggregated data
+-   Iteratively reweighted least squares for robustness
+
+#### Connection to Linearization Transformations
+
+Transformations serve dual purposes in nonlinear regression, bridging concepts from Chapter 2 and this chapter [@bates_watts_1988, pp. 34-35] . When we logarithmically transform the Cobb-Douglas function $Y = AL^{\alpha}K^{\beta}$ (@sec-linearization-transformation), we simultaneously:
+
+1.  **Linearize the model**: Converting it to $\ln(Y) = \ln(A) + \alpha\ln(L) + \beta\ln(K)$
+2.  **Change the error structure**: Moving from additive to multiplicative errors
+
+This duality has profound implications. An additive error on the log scale: $$\ln(Y) = \ln(A) + \alpha\ln(L) + \beta\ln(K) + \epsilon'$$ {#eq-log-additive}
+
+corresponds to a multiplicative error on the original scale: $$Y = AL^{\alpha}K^{\beta} \cdot \exp(\epsilon')$$ {#eq-multiplicative}
+
+Crucially, multiplicative errors exhibit heteroscedasticity—variance increases with the mean response. Thus, the log transformation that linearizes the Cobb-Douglas model *simultaneously* stabilizes variance under multiplicative error assumptions.
+
+### Evaluating Distributional Assumptions {#sec-eval-assumptions}
+
+#### Normality Diagnostics {#sec-normality-diagnostics}
+
+The Q-Q plot compares standardized residuals $\hat{e}_i = \hat{r}_i/\hat{\sigma}$ against normal quantiles $\Phi^{-1}((i-0.5)/n)$. Deviations from linearity indicate [@meier2023, pp. 30-33] :
+
+-   **S-shaped**: Heavy tails (outlier presence)
+-   **Curved**: Skewness requiring transformation
+
+Shapiro-Wilk test statistic formally tests normality: $$W = \frac{(\sum a_i \hat{e}_{(i)})^2}{\sum (\hat{e}_i - \bar{\hat{e}})^2}$$ {#eq-shapiro-wilk} with $a_i$ derived from expected normal order statistics [@ritz_streibig_2008, p. 69].
+
+#### Addressing Non-normality
+
+**Transformations** often simultaneously improve multiple assumptions:
+
+\- Logarithm: Right-skewed errors from multiplicative processes
+
+\- Square root: Moderate skewness in count data
+
+\- Inverse: Extreme positive skewness
+
+**Robust Methods** accommodate outliers without transformation, see @sec-robust-nonlinear.
+
+### Verifying Independence {#sec-verifying-independence}
+
+#### Correlation Detection
+
+The lag plot $(r_i, r_{i-1})$ reveals serial correlation through departure from circular scatter [@ritz_streibig_2008, p. 69; @bates_watts_1988, pp. 92-96] . Lag-1 autocorrelation $\hat{\rho}_1 = \text{Cor}(r_i, r_{i-1})$ quantifies linear dependence, with $|\hat{\rho}_1| > 2/\sqrt{n}$ suggesting violation.
+
+The runs test examines the sequence of residual signs $s_i = \text{sign}(\hat{r}_i)$ [@motulsky1987]. A run is a maximal sequence of consecutive identical signs, with total runs $R$ having expected value: $$E[R] = 1 + \frac{2n_+n_-}{n_+ + n_-}$$ {#eq-runs-expected} where $n_+$ and $n_-$ denote positive and negative residuals respectively. However, this test exhibits limited power because it utilizes only residual signs rather than magnitudes, potentially missing subtle dependence patterns [@ritz2011].
+
+Higher-order dependence requires autocorrelation function analysis: $\hat{\rho}_k = \text{Cor}(r_i, r_{i-k})$ for lags $k = 1, 2, \ldots$.
+
+#### Remedying Dependence
+
+**Model Correlation Structure** via generalized least squares:
+
+\- AR(1): $\text{Cor}(\epsilon_i, \epsilon_j) = \rho^{|i-j|}$ for time series, see @sec-adressing-autocorrelation.
+
+\- Spatial: $\text{Cor}(\epsilon_i, \epsilon_j) = \exp(-d_{ij}/\phi)$ based on distance.
+
+```{=latex}
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Practical Implementation}
+\thispagestyle{empty}
+
+\vspace*{\fill}
+\begin{center}
+  \Huge\bfseries Practical Implementation
+\end{center}
+\vspace*{\fill}
+
+\clearpage
+```
+
+## Practical Implementation
+
+This section demonstrates diagnostic procedures using the `nlstools` and `statforbiology` packages, extending beyond the basic functionality from Chapter 3's parameter estimation.
+
+### Enzyme Kinetics Case Study {#sec-heteroscedastic-enzyme-2}
+
+We continue with the Michaelis-Menten model from @sec-michaelis-menten, now focusing on diagnostic assessment when heteroscedasticity violates the constant variance assumption. The data were generated to deliberately introduce heteroscedasticity, where the variance increases with the magnitude of the response. This mimics real experimental conditions in which measurement precision often decreases at higher reaction rates.
+
+```{r setup, message=FALSE, warning=FALSE}
+library(nlstools)
+library(statforbiology)
+library(ggplot2)
+
+set.seed(123)
+n <- 64
+substrate <- rep(c(0.1, 0.2, 0.5, 1, 2, 5, 10, 20), each = 8)
+
+# true params
+Vmax_true <- 100
+Km_true <- 2
+
+# true response
+rate_true <- (Vmax_true * substrate) / (Km_true + substrate)
+
+# heteroscedastic errors: variance increases
+sigma_i <- 0.5 + 0.12 * rate_true
+errors <- rnorm(n, mean = 0, sd = sigma_i)
+rate <- rate_true + errors
+
+enzyme_data <- data.frame(substrate = substrate, rate = rate)
+
+# fit model
+mm_model <- nls(rate ~ Vmax * substrate / (Km + substrate), 
+                data = enzyme_data,
+                start = list(Vmax = 90, Km = 2)) # close values, arbitrary
+
+print(summary(mm_model))
+```
+
+The fitted model yields parameter estimates $\hat V_{\max}=99.96$ and $\hat K_m=1.952$, which are very close to the true values $(100,2)$. Standard errors $(2.254,\,0.149)$ produce large $t$-ratios with $p<2\times 10^{-16}$, supporting statistical significance; however, these tests rely on the equal-variance assumption and should be interpreted with caution under potential heteroscedasticity. The residual standard error is $6.07$ on $62$ degrees of freedom. The optimization converged in $4$ iterations.
+
+### Initial Diagnostic Assessment {#sec-initial-diagnostic}
+
+The `nlstools` package provides `nlsResiduals()` which computes four essential diagnostics simultaneously. This comprehensive function generates: (1) Residuals versus fitted values plot for detecting heteroscedasticity and nonlinearity (2) Standardized residuals plot for identifying outliers (3) Autocorrelation function for revealing serial correlation and lastly (4) Q-Q plot for assessing normality.
+
+```{r initial_diagnostics, fig.height=4.5}
+mm_residuals <- nlsResiduals(mm_model)
+plot(mm_residuals)
+```
+
+The diagnostic plots reveal clear violation of the constant variance assumption. Residual variance increases with fitted values, and the Q-Q plot shows departures from normality in both tails. Despite heteroscedasticity, residuals show no serial dependence, confirming independence.
+
+### Box-Cox Transformation {#sec-box-cox-applied}
+
+The `statforbiology` package provides `boxcox.nls()` implementing the transform-both-sides (TBS) method for nonlinear regression [@onofri2024, p. 9; @carroll1988, pp. 115-121]. This sophisticated approach differs from standard Box-Cox by transforming both response and model structure, maintaining the nonlinear relationship while stabilizing variance, see @sec-transform-both-sides for a further discussion. The `drc` package also offers Box-Cox functionality through `boxcox.drc()`, but restricted to dose-response applications [@ritz2016, p. 14] .
+
+```{r boxcox_transformation}
+mm_transformed <- boxcox(mm_model, plotit = TRUE, level = 0.95)
+summary(mm_transformed)
+```
+
+The Box-Cox analysis determined that the optimal transformation parameter ($\lambda$) is approximately 0.2. This value maximizes the log-likelihood function, as shown by the peak in the provided plot.
+
+The 95% confidence interval for $\lambda$ is calculated to be $[0.061, 0.395]$. Crucially, this interval does not include $\lambda = 1$ (indicating no transformation is needed) or $\lambda = 0$ (a log transformation). This provides strong statistical evidence that applying a power transformation with $\lambda \approx 0.2$ is more appropriate for this data than leaving it untransformed or applying a standard logarithmic transformation.
+
+After the transformation, the fit converges slightly faster (4 to 2 iterations). Parameter estimates remain near the data-generating values: $V_{\max}$ $\approx$ 100.26 vs 99.96; $K_m \approx$ 2.015 vs 1.952. On the transformed scale, the standard error increases for $V_{\max}$ but decreases for $K_m$). This pattern might be expected: the transformation might down-weight the high-rate region that mostly informs $V_{\max}$, while stabilizing variance around the curvature that identifies $K_m$. Note that SEs and residual standard errors (6.07 vs 0.260) are not directly comparable across scales. For inference on the original rate scale, report back-transformed predictions/CIs with bias correction (e.g., smearing), or, to keep parameters on the original scale, fit a heteroscedastic model (e.g., `gnls` with `varPower`) and compare SEs there.
+
+### Comparing Diagnostic Plots
+
+We assess transformation effectiveness by comparing diagnostic plots before and after Box-Cox transformation.
+
+```{r compare_diagnostics, message=FALSE, warning=FALSE, results="hide", fig.height= 4.5}
+mm_residuals_transformed <- nlsResiduals(mm_transformed)
+plot(mm_residuals_transformed, main = "Box-Cox Transformed Model")
+```
+
+After Box-Cox transformation, residuals display consistent scatter across fitted values, confirming successful variance stabilization. Standardized residuals fall within acceptable bounds, and the Q-Q plot aligns closely with the theoretical line. Autocorrelation remains negligible, preserving error independence.
+
+### Parameter Comparison {#sec-param-comparison-applied}
+
+While the Box-Cox transformation is a powerful tool for stabilizing variance, this statistical improvement requires a careful shift in interpretation. A common concern with transformations is the potential loss of parameter meaning; however, the 'transform-both-sides' approach elegantly avoids this specific problem. With this method, the structural parameters ($V_{max}$, $K_{m}$) retain their usual biochemical meaning because the underlying functional relationship is preserved [@carroll1988, p. 117].
+
+Where the interpretation does change is in the model's scale and error structure. The model now operates on a transformed scale, meaning that fit statistics like the residual standard error are not directly comparable to those from the untransformed model [@carroll1988, p. 118] . Consequently, while we gain a statistically more robust model, we must be mindful that we are interpreting its performance on a different scale than the original data.
+
+```{r parameter_comparison}
+print(coef(summary(mm_model))) # original model summary
+
+print(coef(summary(mm_transformed))) # transfomed model summary
+
+cat(sprintf("\nResidual standard error - Original: %.3f\n", sigma(mm_model)))
+cat(sprintf("Residual standard error - Transformed: %.3f\n", sigma(mm_transformed)))
+```
+
+The output clearly illustrates the results of the transformation. The reduction in the residual standard error (from 6.070 down to 0.260) hints that the transformation successfully stabilized the model's variance, although interpretation is restricted because of that very transformation, see above.
+
+This statistical gain, however, requires careful interpretation. With the transform-both-sides method, the parameters ($V_{max}$, $K_{m}$) retain their original physical meaning. The trade-off is not a loss of biological interpretation, but rather that the model's fit and its associated statistics are now on a different scale, defined by the Box-Cox transformation with $\lambda = 0.2$. For instance, while the numerical value for the standard error of $K_{m}$ changed (from 0.15 to 0.11), this comparison is complex because the standard errors are calculated on different scales. This highlights the true trade-off: we gain a statistically more robust model but must be more careful when interpreting and comparing fit statistics across the original and transformed scales.
+
+### Alternative Transformations
+
+When optimal $\lambda$ approaches common values, practitioners often use nearest interpretable transformations [@ritz_streibig_2008, p. 81]:
+
+-   $\lambda \approx 0$: Logarithmic transformation (multiplicative errors)
+-   $\lambda \approx 0.5$: Square root transformation (Poisson-like variance)
+-   $\lambda \approx -1$: Reciprocal transformation (inverse relationships)
+
+### Residual Diagnostic Tests {#sec-res-diagnostic-test-applied}
+
+Visual assessment provides intuitive understanding, but formal tests offer objective criteria. The `nlstools` package provides `test.nlsResiduals()` performing Shapiro-Wilk normality test and runs test for randomness.
+
+```{r diagnostic_tests}
+orig_tests <- test.nlsResiduals(mm_residuals)
+trans_tests <- test.nlsResiduals(mm_residuals_transformed)
+
+print(orig_tests) # original model tests
+
+print(trans_tests) # transformed model tests
+```
+
+Test results confirm visual assessment:
+
+**Shapiro-Wilk Test for Normality**: Original model shows strong evidence against normality ($W = 0.946$, $p = 0.007$), consistent with Q-Q plot deviations. After Box-Cox transformation, $W = 0.991$ with $p = 0.912$ indicates residuals now consistent with normality. The transformation successfully addresses both heteroscedasticity and non-normality simultaneously.
+
+**Runs Test for Randomness**: Both models show $p = 0.132$, failing to reject randomness null hypothesis. Identical results occur because Box-Cox transformation is monotonic, preserving residual order and sign pattern while adjusting magnitudes.
+
+Formal tests corroborate visual diagnostics: primary violation was normality due to heteroscedasticity, which Box-Cox transformation successfully remedies. Absence of autocorrelation in both models confirms error independence throughout.

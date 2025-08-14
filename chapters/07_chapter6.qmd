@@ -1,0 +1,676 @@
+---
+title: "Applications"
+---
+
+```{r, echo=FALSE}
+source("setup.R")
+```
+
+## Introduction
+
+The preceding chapters established the theoretical foundations and practical methods for nonlinear regression. Chapter 2 developed the mathematical framework, Chapter 3 explored parameter estimation techniques, Chapter 4 addressed model diagnostics, and Chapter 5 presented statistical inference methods. This chapter demonstrates how these tools apply across three scientific domains using established R datasets.
+
+We examine three canonical nonlinear models: the Gompertz growth model in biology (@sec-gompert-growth-example), the Cobb-Douglas production function in economics (@sec-example-cobb-douglas), and Hill dose-response relationships in pharmacology (@sec-example-hill-dose).
+
+## Biology: Gompertz Growth Model {#sec-gompert-growth-example}
+
+### Model Specification and Biological Context
+
+To avoid notational clutter, we use the numerically stable reparameterization of the Gompertz curve
+$$
+N(t)=A\,\exp\!\big(-B\,C^{\,t}\big), \qquad A>0,\; B>0,\; 0<C<1.
+$$ {#eq-gompertz-reparam}
+
+This form is algebraically equivalent to the standard solutions derived from the Gompertz differential equation (see @eq-reparameter). Here:
+
+- $A$ is the asymptote (carrying capacity).
+- $B=\ln(A/N_0)$ so that $N(0)=A\,e^{-B}=N_0$.
+- $C$ controls the approach speed; if a rate $r>0$ is preferred, set $C=e^{-r}$ so $r=-\ln C$.
+
+This parameterization matches the self-starting function `SSgompertz(x, Asym, b2, b3) = Asym * exp(-b2 * b3^x)` exactly via  $A=$`Asym`, $B=$`b2`, and $C=$`b3`.
+
+### Growth Data from the growthrates Package
+
+We analyze bacterial growth curves from the `growthrates` package, representing bacteria concentration populations monitored via optical density measurements [@petzoldt2025, p. 11] .
+
+```{r load-packages}
+#| echo: true
+#| message: false
+#| warning: false
+library(statforbiology)
+library(growthrates)
+library(nlme)
+
+# Load and prepare bacterial growth data
+data("bactgrowth")
+growth_data <- subset(bactgrowth, strain == "D" & conc == 0 & replicate == 1)
+growth_data <- growth_data[, c("time", "value")]
+names(growth_data) <- c("time", "density")
+```
+
+Initial visualization confirms the expected sigmoidal pattern and informs starting value selection (see Chapter 3, @sec-case-study-initial-parameters):
+
+```{r initial-growth-plot}
+#| label: fig-growth-initial
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Bacterial growth curve, dataset `bactgrowth`"
+
+library(ggplot2)       # visualization
+library(scales)
+ggplot(growth_data, aes(x = time, y = density)) +
+  geom_point(size = 1.8, alpha = 0.9, color = thesis_palette["gray"]) +
+  labs(
+    x = "Time (hours)",
+    y = "Optical Density",
+  ) +
+  scale_x_continuous(breaks = pretty_breaks(5),
+                     expand = expansion(mult = c(0.01, 0.03))) +
+  theme_thesis(grid = "y")
+```
+
+The plot in @fig-growth-initial reveals the characteristic asymmetric S-curve of Gompertz growth. The initial lag phase (0-5 hours) reflects metabolic adjustment. Rapid exponential growth follows (5-15 hours), with the inflection point occurring around 10 hours.
+
+### Parameter Estimation Using nlstools {#sec-param-estimation}
+
+We use the self-starting function `SSgompertz()`, which automates initial parameter estimation as discussed in Chapter 3, @sec-self-starting-functions:
+
+```{r gompertz-self-start}
+#| echo: true
+#| message: false
+#| warning: false
+# gompertz model with self-starting function
+formula_gompertz <- density ~ SSgompertz(time, Asym, b2, b3)
+gompertz_ss <- nls(formula_gompertz, data = growth_data)
+
+library(nlstools)
+overview(gompertz_ss)
+```
+
+The fit converged in a single iteration, indicating that the self-starting routine provided near-optimal initial values. The parameter estimates are biologically interpretable:
+
+-   **Asym** = 0.104 represents the carrying capacity $K$ where growth ceases
+-   **b2** = 2.008 indicates the relationship between initial and final population sizes
+-   **b3** = 0.874 relates to the growth rate parameter
+
+On top of that, the output shows strong significance, with p-values close to zero.
+
+All parameters are highly significant (p-values $\approx 0$). The correlation matrix shows pronounced dependencies (e.g., $\operatorname{corr}(\text{Asym}, b3)=0.842$), implying that uncertainty in $K$ is intertwined with the rate parameter. Profile t-based or bootstrap intervals are therefore preferable to marginal Wald intervals, see @sec-wald-intervals.
+
+### Model Diagnostics with nlstools
+
+Comprehensive diagnostics validate model assumptions before proceeding to inference (Chapter 4):
+
+```{r residual-diagnostics}
+#| echo: true
+#| label: fig-gompertz-diagnostics
+#| message: false
+#| warning: false
+#| fig-cap: "Diagnostic plots revealing positive autocorrelation in residuals"
+#| fig-height: 5
+gompertz_resid <- nlsResiduals(gompertz_ss)
+plot(gompertz_resid)
+```
+
+The diagnostic plots in @fig-gompertz-diagnostics show:
+
+1.  **Residuals vs Fitted**\
+   The plot of residuals versus fitted values exhibits a clear curvilinear pattern, indicating systematic model misspecification. Because successive observations are positively correlated (see autocorrelation), this pattern could be an artefact of autocorrelation rather than a true lack-of-fit.
+
+2.  **Autocorrelation**\
+    The cloud of points slopes upward. This serial dependence violates the independence assumption.
+
+3.  **Standardised Residuals vs Fitted**\
+    Apart from the mild downward drift (again consistent with positive autocorrelation), the vertical spread is roughly constant, suggesting little evidence of heteroscedasticity.
+
+4.  **Normal Q-Q Plot**\
+    Points adhere closely to the diagonal except for mild tail departures, indicating the normality assumption is still reasonable for $t$-based inference.
+
+Formal tests quantify these assessments:
+
+```{r assumption-tests}
+#| echo: true
+#| message: false
+#| warning: false
+test.nlsResiduals(gompertz_resid)
+```
+
+The Shapiro-Wilk test (W = 0.952, p = 0.174) supports normality, while the runs test (p \< 0.0001) strongly rejects randomness, confirming autocorrelation. This violation necessitates adjusted inference procedures.
+
+### Addressing Autocorrelation with gnls {#sec-adressing-autocorrelation}
+
+The detected autocorrelation violates ordinary least squares assumptions. We address this using generalized nonlinear least squares (GNLS) with AR(1) errors, see @sec-verifying-independence:
+
+```{r gnls-gompertz}
+#| echo: true
+#| message: false
+#| warning: false
+library(nlme) 
+
+gompertz_gnls_ss <- gnls(
+  density ~ SSgompertz(time, Asym, b2, b3),
+  data        = growth_data,
+  correlation = corAR1(form = ~ time)
+)
+
+summary(gompertz_gnls_ss)
+
+phi <- coef(gompertz_gnls_ss$modelStruct$corStruct, unconstrained = FALSE)
+cat("Estimated AR(1) parameter:", round(phi, 3), "\n")
+```
+
+Accounting for autocorrelation reveals very strong lag-1 serial dependence ($\hat{\phi}=0.856$), violating the OLS independence assumption and explaining the residual-versus-fitted pattern. Correcting with an AR(1) structure inflates the OLS standard errors, shrinking the $t$-statistics by roughly the same proportion. Nevertheless, all three parameters remain highly significant at $\alpha=0.05$. Consequently, confidence and prediction intervals under the AR(1) model are wider but more reliable, and further analyses (e.g., estimating growth rates or comparing treatments) should be based on the `gnls` results.
+
+### Lag plots: nls vs GNLS residuals
+
+A side-by-side lag plot makes the contrast clearer. We combine both plots in one chunk with `par(mfrow = c(1, 2))` and omit regression lines so the eye focuses on the overall scatter.
+
+```{r lag-plots-side-by-side}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Lag plots: (left) *nls* residuals, (right) *GNLS* normalised residuals"
+par(mfrow = c(1, 2))
+
+# nls lag plot
+res_nls  <- resid(gompertz_ss)
+lag1_nls <- c(NA, head(res_nls, -1))
+plot(lag1_nls, res_nls,
+     xlab = "lag(residual, 1)", ylab = "residual",
+     main = "nls residuals", pch = 19, col = "grey")
+
+# gnls normalised lag plot
+res_gnls_norm  <- residuals(gompertz_gnls_ss, type = "normalized")
+lag1_gnls <- c(NA, head(res_gnls_norm, -1))
+plot(lag1_gnls, res_gnls_norm,
+     xlab = "lag(normalized resid, 1)", ylab = "normalized resid",
+     main = "GNLS residuals", pch = 19, col = "grey")
+
+par(mfrow = c(1, 1))  # reset graphics layout
+```
+
+The nls residuals (left) cluster along a rising diagonal, signalling strong lag-1 autocorrelation. After accounting for AR(1) errors, the GNLS normalised residuals (right) form a more diffuse cloud, showing that most serial dependence has been removed.
+
+### Statistical inference {#sec-bootstrap-inference}
+
+As seen in @sec-param-estimation, we have strong correlation between parameters. In such cases we prefer profile-likelihood or bootstrap marginal intervals. Here we report bootstrap CIs for the GNLS fit that respect the estimated AR(1) error structure using the package `nlraa` [@miguez2025, p. 7].
+
+```{r boot nlme, message = FALSE, warning=FALSE}
+library(nlraa)
+
+set.seed(123)
+gomp_bt <- boot_nlme(gompertz_gnls_ss, R = 999)
+confint(gomp_bt, type = "perc")
+```
+
+These percentile intervals show that Asym, b2, and b3 remain clearly different from zero while properly reflecting the added uncertainty from autocorrelation and nonlinearity.
+
+### Model comparison
+
+Lastly, to confirm the validity of Gompertz, we compare the Gompertz and logistic models and fit both with the same AR(1) error so the comparison is fair.
+
+```{r model-comparison}
+#| echo: true
+#| message: false
+#| warning: false
+
+gompertz_gnls <- gnls(
+  density ~ SSgompertz(time, Asym, b2, b3),
+  data = growth_data,
+  correlation = corAR1(form = ~ time)
+)
+
+logistic_gnls <- gnls(
+  density ~ SSlogis(time, Asym, xmid, scal),
+  data = growth_data,
+  correlation = corAR1(form = ~ time)
+)
+
+AIC(gompertz_gnls, logistic_gnls)
+```
+
+According to our guideline in @sec-interpretation-aic, a difference in AIC of around 2 or similar indicates the models are essentially equivalent. With $\Delta AIC \approx 2$, neither model is clearly favored; both are comparably supported.
+
+### Final Visual Fit
+
+To visually assess the quality of our final model, we will now plot the fitted Gompertz curve over the original data. This visualization provides an intuitive check of how well the model captures the overall sigmoidal growth pattern.
+
+```{r fig-gompertz-fit, echo = FALSE, fig.cap= "Gompertz Model Fit with AR(1) Errors", warning=FALSE}
+# predictions (safer to pass a data.frame to predict)
+time_seq <- seq(min(growth_data$time), max(growth_data$time), length.out = 100)
+pred_df  <- data.frame(
+  time    = time_seq,
+  density = as.numeric(predict(gompertz_gnls_ss, newdata = data.frame(time = time_seq))),
+  series  = "GNLS fit"
+)
+
+obs_df <- transform(growth_data, series = "Observed")
+
+# ensure legend order matches desired colors (gray = points, blue = fit)
+obs_df$series <- factor(obs_df$series, levels = c("Observed", "GNLS fit"))
+pred_df$series <- factor(pred_df$series, levels = c("Observed", "GNLS fit"))
+
+library(ggplot2)
+
+ggplot() +
+  geom_point(data = obs_df, aes(time, density, color = series), size = 1.8, alpha = 0.9) +
+  geom_line(data = pred_df, aes(time, density, color = series), linewidth = 0.9) +
+  scale_color_thesis(
+    order  = c("gray", "blue"),
+    name   = NULL,
+    breaks = c("Observed", "GNLS fit"),
+    labels = c("Observed", "GNLS fit")
+  ) +
+  labs(
+    x = "Time",
+    y = "Density"
+  ) +
+  theme_thesis(grid = "y")
+```
+
+@fig-gompertz-fit provides a clear visual confirmation of the model's excellent performance.
+
+1.  **Excellent Overall Fit:** The solid line, representing the predictions from the `gnls` model, passes almost perfectly through the center of the observed data points. This indicates that the Gompertz functional form is highly effective at describing the underlying growth process.
+
+2.  **Captures All Growth Phases:** The model approximately captures the key phases of bacterial growth visible in the data:
+
+In summary, the plot demonstrates that the Gompertz model with an AR(1) error structure provides a robust and accurate description of the observed bacterial growth data.
+
+```{=latex}
+\FloatBarrier
+```
+
+
+## Economics: Cobb-Douglas Production Function {#sec-example-cobb-douglas}
+
+Building on biological applications, we examine economic production relationships through the Cobb-Douglas function.
+
+### Theoretical Foundation
+
+We revisit the two input Cobb-Douglas production function (@eq-cobb-douglas) that captures how inputs combine multiplicatively to generate output:
+
+$$Y = AL^{\alpha}K^{\beta}
+\tag{\ref{eq-cobb-douglas}}$$
+
+where $Y$ denotes output, $L$ labor input, $K$ capital input, and $A$ total factor productivity. The elasticity parameters $\alpha$ and $\beta$ measure percentage output response to percentage input changes. Under competitive markets, these equal factor income shares-linking production technology to income distribution.
+
+The sum $\gamma = \alpha + \beta$ determines returns to scale: $\gamma = 1$ implies constant returns (doubling inputs doubles output), $\gamma > 1$ indicates increasing returns to scale, and $\gamma < 1$ suggests decreasing returns to scale [@blanchard2017 p. 259].
+
+### Production Data Analysis
+
+We analyze agricultural production data from the `desk` package [@hoffmann2025, p. 17]:
+
+```{r load-econ-data}
+#| echo: true
+#| message: false
+#| warning: false
+library(desk)
+df <- data.cobbdoug
+names(df) <- c("Y", "L", "K")
+```
+
+### Parameter Estimation with Economic Priors
+
+Economic theory guides parameter initialization. Textbook suggest labor shares typically range around $1/3$ developed economies, with capital shares around $2/3$ [@blanchard2017, p. 259, 281].
+
+The starting value for `A` (Total Factor Productivity) is derived by algebraically rearranging the Cobb-Douglas production function. To solve for A, we algebraically isolate it: $A = Y / (L^{\alpha} \cdot K^{\beta})$.
+This rearranged formula is implemented in the code to find a reasonable starting point for the statistical model. It uses the average values of output, labor, and capital from the dataset, along with the initial estimates for $\alpha$ and $\beta$.
+
+```{r cd-estimation}
+#| echo: true
+#| label: fig-cd-preview
+#| message: false
+#| warning: false
+#| fig-cap: "Preview of Cobb-Douglas model with economically meaningful starting values"
+library(nlstools)
+
+alpha_start <- 1/3  # Labor elasticity
+beta_start  <- 2/3  # Capital elasticity
+A_start     <- mean(df$Y) / (mean(df$K)^beta_start * mean(df$L)^alpha_start)
+
+preview(
+  formula = Y ~ A * K^beta * L^alpha,
+  data    = df,
+  start   = c(A = A_start, alpha = alpha_start, beta = beta_start)
+)
+```
+
+@fig-cd-preview seems to confirm approximately sensible predictions. We will thus take them as starting values and estimate the parameters:
+
+```{r cd-fit}
+#| echo: true
+#| message: false
+#| warning: false
+cobb_douglas <- nls(
+  formula = Y ~ A * K^beta * L^alpha,
+  data    = df,
+  start   = list(A = A_start, alpha = alpha_start, beta = beta_start)
+)
+summary(cobb_douglas)
+```
+
+The nonlinear model successfully converged with three iterations. The estimates reveal economically meaningful parameters. Labor elasticity ($\alpha = 0.383$) indicates moderate labor intensity. Capital elasticity ($\beta = 0.593$) demonstrates capital's dominant role in modern agriculture. The sum (0.976) suggests approximately constant returns to scale.
+
+### Diagnostic Analysis for Production Data
+
+In a next step, we will check the model assumptions:
+
+```{r cd-diagnostics}
+#| echo: true
+#| label: fig-cd-diagnostics
+#| message: false
+#| warning: false
+#| fig-height: 5
+#| fig-cap: "Diagnostic plots for Cobb-Douglas model"
+cd_residuals <- nlsResiduals(cobb_douglas)
+plot(cd_residuals)
+```
+
+@fig-cd-diagnostics reveals:
+
+1.  **Residuals vs Fitted**: Fairly random scatter around zero. 
+
+2.  **Autocorrelation**: Random scatter confirms independence in cross-sectional data.
+
+3.  **Q-Q Plot**: Points adhere closely to the diagonal line with minor tail deviations.
+
+4.  **Standardized Residuals**: Even scatter within \[-2, 2\] without systematic patterns.
+
+```{r cd-formal-tests}
+#| echo: true
+#| message: false
+#| warning: false
+test.nlsResiduals(cd_residuals)
+```
+
+The Shapiro-Wilk test shows no evidence against normality (p = 0.465), and the runs test confirms randomness.
+
+### Variance Stabilization via Box-Cox {#sec-variance-stab-box-cox}
+
+While diagnostics showed no severe violations, we explore Box-Cox transformation as a sensitivity check:
+
+```{r cd-box-cox}
+#| echo: true
+#| label: fig-cd-boxcox
+#| message: false
+#| warning: false
+#| fig-cap: "Box-Cox profile likelihood for variance stabilization"
+cd_bc <- boxcox(cobb_douglas,
+                lambda = seq(-1, 3, 0.05),
+                plotit = TRUE)
+
+summary(cd_bc)
+
+(lambda_opt <- cd_bc$lambda[[1]]) # optimal box-cox lambda
+```
+
+The profile likelihood in @fig-cd-boxcox peaks near $\lambda = 0.7$, but the 95% confidence interval (0.2 to 1.2) includes $\lambda = 1$. This provides no statistical evidence requiring transformation.
+
+Crucially, applying the Box-Cox transformation would also sacrifice economic interpretability. When $\lambda = 1$ falls within the confidence interval, preserving the original interpretation maintains both statistical validity and theoretical meaning.
+
+### Returns to Scale Analysis
+
+Understanding returns to scale is crucial because it reveals fundamental insights into an economy's production technology, influencing firm behavior, market structure, and long-run growth potential [@mas-colell1995, pp. 129-134].
+
+-   **Increasing Returns to Scale (**$\gamma > 1$): Output increases by *more* than the proportional increase in inputs. This implies that larger firms are more efficient, and production tends to become concentrated in a few large firms, potentially leading to natural monopolies.
+-   **Constant Returns to Scale (**$\gamma = 1$): Output increases by the *same* proportion as the increase in inputs. Efficiency is independent of the scale of operation. This is a foundational assumption for models of perfect competition and is often used as a baseline in macroeconomic growth models.
+-   **Decreasing Returns to Scale (**$\gamma < 1$): Output increases by *less* than the proportional increase in inputs. This suggests the presence of diseconomies of scale, where large operations become inefficient, perhaps due to managerial complexity or other constraining factors.
+
+Therefore, empirically determining the returns to scale for the agricultural data analyzed here provides insight into its production technology and competitive landscape. A central economic question concerns this relationship. We test constant returns to scale via the delta method, defining $g(\theta)=\alpha+\beta-1$ and using $\nabla g=(1,1)$ with the estimated covariance of $(\hat\alpha,\hat\beta)$ to form a Wald CI for $g(\theta)=0$ (i.e., $\alpha+\beta=1$):
+
+```{r rts-analysis}
+#| echo: true
+#| message: false
+#| warning: false
+
+# returns to scale
+params   <- coef(cobb_douglas)
+alpha    <- params["alpha"]
+beta     <- params["beta"]
+rts_est  <- alpha + beta
+
+cat("Returns to scale (alpha + beta):", round(rts_est, 3), "\n\n")
+
+# test hypothesis
+library(car)
+rts_test <- deltaMethod(cobb_douglas, "alpha + beta - 1")
+print(rts_test)
+```
+
+The point estimate (0.976) is remarkably close to 1. The 95% confidence interval \[-0.076, 0.029\] includes zero, failing to reject constant returns to scale ($H_0: \alpha + \beta = 1$).
+
+## Pharmacology: Dose-Response Relationships {#sec-example-hill-dose}
+
+Completing our applications, we next examine dose-response modeling-fundamental to drug development and toxicology.
+
+### The Hill Equation in Drug Development
+
+The Hill equation provides the mathematical foundation for dose-response relationships, originating from @hill_new_1910 analysis of oxygen-hemoglobin binding. Starting from equilibrium binding kinetics with $n$ cooperative sites and assuming response proportional to occupancy:
+
+$$E = E_{min} + \frac{E_{max} - E_{min}}{1 + \left(\frac{EC_{50}}{C}\right)^n}$$ {#eq-hill-response}
+
+Rearranging to standard form, assuming $E_{min} = 0$ and thus revisiting @eq-hill-standard-known:
+
+$$E = \frac{E_{max} \cdot C^n}{EC_{50}^n + C^n}
+\tag{\ref{eq-hill-standard-known}}$$
+
+here: 
+
+- $E$: observed effect/response, 
+- $E_{max}$: maximum achievable effect (efficacy), 
+- $EC_{50}$: concentration producing half-maximal effect (potency), 
+- $n$: Hill coefficient (steepness/cooperativity) and $C$: compound concentration
+
+The Hill coefficient reveals binding cooperativity: $n = 1$ indicates independent binding, $n > 1$ suggests positive cooperativity, while $n < 1$ implies negative cooperativity.
+
+### Ryegrass Inhibition Data
+
+We analyze root growth inhibition in ryegrass exposed to secalonic acid:
+
+```{r load-pharma-data}
+#| echo: true
+#| message: false
+#| warning: false
+library(drc)
+data(ryegrass)
+```
+
+```{r fig-ryegrass, echo = FALSE, fig.cap="Ryegrass Root Inhibition"}
+library(ggplot2)
+library(scales)
+
+ggplot(ryegrass, aes(x = conc, y = rootl)) +
+  geom_point(size = 1.8, alpha = 0.9, color = thesis_palette["gray"]) +
+  labs(
+    x = "Concentration (mM)",
+    y = "Root Length (cm)",
+  ) +
+  scale_x_continuous(breaks = pretty_breaks(5),
+                     expand = expansion(mult = c(0.01, 0.03))) +
+  theme_thesis(grid = "y")
+
+```
+
+On the linear-dose scale, as illustrated by @fig-ryegrass, root length remains high at low concentrations, exhibits a sharp monotonic decline over intermediate doses, and approaches a lower asymptote - consistent with an inhibitory sigmoidal response.
+
+### Model Fitting with drc Package
+
+The `drc` package provides specialized dose-response tools [@ritz2016]:
+
+```{r fit-hill-model}
+#| echo: true
+#| message: false
+#| warning: false
+# Fit four-parameter log-logistic (Hill) model
+rye_model <- drm(rootl ~ conc,
+                 data = ryegrass,
+                 fct  = LL.4())
+
+summary(rye_model)
+```
+
+Parameter estimates reveal a steep log-dose transition with $b=2.98$ (SE $0.47$; very small $p$-value); a lower asymptote $c=0.48\,\mathrm{cm}$ (SE $0.21$) with reasonably small $p$-value; an upper asymptote $d=7.79\,\mathrm{cm}$ (SE $0.19$; very small $p$-value) capturing uninhibited growth; and an EC50 of $e=3.06\,\mathrm{mM}$ (SE $0.19$; very small $p$-value), indicating moderate potency.
+
+### Model Diagnostics
+
+Unfortunately, for `drc` objects, we cannot use the package `nlstools`. Thus, in order to analyze the diagnostics tools here, we require manual diagnostic plots:
+
+```{r pharma-diagnostics}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-height: 4
+#| label: fig-pharma-diagnostics
+#| fig-cap: "Residual diagnostics for dose-response model"
+
+# Extract residuals and fitted values
+res <- residuals(rye_model)
+fit <- fitted(rye_model)
+
+par(mfrow = c(2, 2))
+
+# Diagnostic plots
+plot(fit, res, 
+     xlab = "Fitted values", 
+     ylab = "Residuals",
+     main = "Residuals vs Fitted")
+abline(h = 0, lty = 2, col = "red")
+
+qqnorm(res, main = "Normal Q-Q Plot")
+qqline(res, col = "red")
+
+plot(fit, sqrt(abs(res)), 
+     xlab = "Fitted values",
+     ylab = "Sqrt(|Residuals|)",
+     main = "Scale-Location")
+
+plot(log(ryegrass$conc + 0.001), res,
+     xlab = "log(Concentration)",
+     ylab = "Residuals",
+     main = "Residuals vs log(Dose)")
+abline(h = 0, lty = 2, col = "red")
+
+par(mfrow = c(1, 1))
+```
+
+@fig-pharma-diagnostics reveals good model adequacy with random residual scatter, good normality, constant variance, and no systematic patterns.
+
+### Bootstrap Inference for Key Parameters
+
+Unlike standard methods that rely on mathematical approximations and large-sample assumptions, bootstrap methods offer a more robust, simulation-based alternative for constructing confidence intervals. @ritz2020 [pp. 29-30] demonsrate a similar parametric bootstrap approach for estimating the confidence interval of an unknown dose in a nonlinear calibration problem .
+
+Here, we apply the same core principle to derive confidence intervals for our model's key parameters: the EC50 and the Hill coefficient. The process for a parametric bootstrap involves these steps, see also @bühlmann2023 [pp. 50-53]
+
+- Fit the dose–response model; obtain fitted values $\hat y$ and $\hat\sigma$.
+- For $r=1,\dots,R$, simulate $y^{*(r)} \sim N(\hat y,\hat\sigma^2)$ at the observed doses and refit the model.
+- Collect $\widehat{EC}_{50}^{(r)}$ and $\hat n^{(r)}$ to form empirical distributions.
+- Use the 2.5th and 97.5th percentiles as 95% CIs.
+
+```{r}
+#| label: fig-pharma-bootstrap
+#| fig-cap: "Bootstrap distributions for the EC50 and Hill coefficient based on 500 parametric resamples."
+#| echo: true
+#| message: false
+#| warning: false
+
+set.seed(123)
+n_bootstraps <- 500
+
+fitted_vals <- fitted(rye_model)
+residual_sd <- sqrt(summary(rye_model)$resVar)
+boot_data_template <- ryegrass
+
+bootstrap_results <- data.frame(
+  ec50 = rep(NA, n_bootstraps),
+  hill_coefficient = rep(NA, n_bootstraps)
+)
+
+for (i in 1:n_bootstraps) {
+  y_boot <- rnorm(n = length(fitted_vals), mean = fitted_vals, sd = residual_sd)
+  boot_data_template$rootl <- y_boot
+  
+  boot_model <- update(rye_model, data = boot_data_template)
+  
+  bootstrap_results$ec50[i] <- drc::ED(boot_model, 50, display = FALSE)[1]
+  bootstrap_results$hill_coefficient[i] <- coef(boot_model)["b:(Intercept)"]
+}
+
+n_failed <- sum(is.na(bootstrap_results$ec50))
+n_success <- n_bootstraps - n_failed
+
+cat(sprintf("Successful iterations: %d\nFailed iterations: %d\n\n", n_success, n_failed))
+
+ci_ec50 <- quantile(bootstrap_results$ec50, c(0.025, 0.975), na.rm = TRUE)
+ci_hill <- quantile(bootstrap_results$hill_coefficient, c(0.025, 0.975), na.rm = TRUE)
+
+cat(sprintf("95%% CI for EC50 (mM):         (%.3f, %.3f)\n", ci_ec50[1], ci_ec50[2]))
+cat(sprintf("95%% CI for Hill coefficient:  (%.3f, %.3f)\n", ci_hill[1], ci_hill[2]))
+```
+
+The simulation ran successfully for all 500 iterations. The 95% bootstrap confidence interval for EC50 is (`r round(ci_ec50[1], 2)`, `r round(ci_ec50[2], 2)` mM), suggesting a well-defined estimate of the compound's potency. For the Hill coefficient, the interval is (`r round(ci_hill[1], 2)`, `r round(ci_hill[2], 2)`). Since this interval does not include 1, it provides strong evidence for positive cooperativity in the dose-response relationship.
+
+### Prediction and Application
+
+To make our model truly useful, we need to understand its uncertainty. We explore this by calculating two types of intervals: **confidence intervals**, which tell us about the uncertainty in the average trend, and **prediction intervals**, which tell us the likely range for a single new measurement. This distinction is critical for making reliable predictions.
+
+```{r prediction-bands, warning = FALSE, message = FALSE}
+library(drc)
+grid <- data.frame(conc = exp(seq(log(0.01), log(100), len = 100)))
+
+ci  <- predict(rye_model, newdata = grid, interval = "confidence")
+pi  <- predict(rye_model, newdata = grid, interval = "prediction")
+
+```
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| label: fig-prediction-bands
+#| fig-cap: "Confidence bands (uncertainty in mean) versus prediction bands (range for new observations)"
+
+library(ggplot2)
+library(patchwork)
+
+conf <- cbind(grid, fit = ci[,1],  low = ci[,2],  up = ci[,3])
+pred <- cbind(grid, fit = pi[,1],  low = pi[,2],  up = pi[,3])
+
+p_conf <- ggplot(ryegrass, aes(conc, rootl)) +
+  geom_point(alpha = .7) +
+  geom_line(data = conf, aes(y = fit)) +
+  geom_ribbon(data = conf,
+              aes(x = conc, ymin = low, ymax = up),
+              fill = "steelblue", alpha = .25,
+              inherit.aes = FALSE) +      # <- stop inheriting y = rootl
+  scale_x_log10() +
+  labs(title = "Confidence band",
+       x = "Dose (mM)", y = "Root length (cm)") +
+  theme_classic()
+
+p_pred <- ggplot(ryegrass, aes(conc, rootl)) +
+  geom_point(alpha = .7) +
+  geom_line(data = pred, aes(y = fit)) +
+  geom_ribbon(data = pred,
+              aes(x = conc, ymin = low, ymax = up),
+              fill = "orange", alpha = .15,
+              inherit.aes = FALSE) +      # <- same fix here
+  scale_x_log10() +
+  labs(title = "Prediction band",
+       x = "Dose (mM)", y = "Root length (cm)") +
+  theme_classic()
+
+p_conf + p_pred
+```
+
+The plots in @fig-prediction-bands highlight a crucial difference between understanding a trend and predicting an individual outcome.
+
+**Confidence Intervals (left plot, in blue)** represent the uncertainty in our model's estimate of the mean. Because we have a decent amount of data, we are relatively certain about this average trend, which is why the blue ribbon is quite narrow across the range of doses. This interval is about the precision of the model's fitted line.
+
+**Prediction Intervals (right plot, in orange)** are about the real world. This interval must account for two sources of uncertainty:
+
+1.  The uncertainty in the model's average curve (the same uncertainty captured by the confidence interval).
+
+2.  The natural, inherent biological variability between individual seeds (the random scatter of the data points around the line).
+
+Because the prediction interval includes this second, much larger source of variability, the orange ribbon is substantially wider. It provides a realistic range for what to expect from a single future observation.

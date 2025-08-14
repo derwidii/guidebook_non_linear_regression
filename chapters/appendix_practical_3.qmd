@@ -1,0 +1,1226 @@
+# Grid Search Implementation {#sec-appendix-grid-search}
+
+This appendix provides the detailed implementation of the grid search method for finding starting values:
+
+```{r}
+#| label: grid-search-implementation
+#| warning: false
+#| message: false
+
+#| label: grid-search-implementation
+#| warning: false
+#| message: false
+
+library(nls2)
+
+# generate data
+set.seed(2025)
+substrate <- seq(0, 10, length.out = 20)
+true_Vmax <- 100
+true_Km   <- 2.5
+velocity  <- true_Vmax * substrate / (true_Km + substrate) + rnorm(length(substrate), sd = 5)
+enzyme_data <- data.frame(substrate, velocity)
+mm_formula <- velocity ~ Vmax * substrate / (Km + substrate)
+
+# initial guess, see domain knowledge
+v0 <- max(enzyme_data$velocity,  na.rm = TRUE)
+k0 <- 0.2 * max(enzyme_data$substrate, na.rm = TRUE)
+
+# grid around these values, 50% to 150%
+vmax_grid <- v0 * seq(0.5, 1.5, length.out = 15)
+km_grid   <- k0 * seq(0.5, 1.5, length.out = 15)
+
+# try every pair of paramters
+start_grid <- expand.grid(Vmax = vmax_grid, Km = km_grid)
+grid_results <- nls2(
+  mm_formula,
+  data      = enzyme_data,
+  start     = start_grid,
+  algorithm = "brute-force"
+)
+
+cat("  Vmax =", round(coef(grid_results)["Vmax"], 1), "\n")
+cat("  Km   =", round(coef(grid_results)["Km"],   2), "\n")
+
+```
+
+While the domain-informed values are biologically reasonable, the grid search provides a robust, data-driven alternative that is less sensitive to incorrect prior assumptions.
+
+# Linearization Implementation {#sec-appendix-linearization}
+
+This appendix shows the complete implementation of the Lineweaver-Burk linearization for the Michaelis-Menten model:
+
+```{r}
+#| label: linearization-implementation
+#| message: false
+#| warning: false
+
+# prepare data (exclude zero substrate to avoid division by zero)
+lin_data <- enzyme_data[enzyme_data$substrate > 0, ]
+lin_data$inverse_s <- 1 / lin_data$substrate
+lin_data$inverse_v <- 1 / lin_data$velocity
+
+# fit linear model to transformed data
+lm_rb <- lm(inverse_v ~ inverse_s, data = lin_data)
+
+# extract parameter estimates from linearization
+linearized_vmax <- 1 / coef(lm_rb)[1]
+linearized_km   <- linearized_vmax * coef(lm_rb)[2]
+
+cat("Parameter estimates from Lineweaver–Burk linearization:\n")
+cat("Vmax =", round(linearized_vmax, 1), "\n")
+cat("Km   =", round(linearized_km, 2), "\n")
+```
+
+```{r}
+#| label: fig-lineweaver-burk
+#| echo: false
+#| fig-cap: "Lineweaver–Burk plot: reciprocal data (open circles) with fitted regression line."
+#| message: false
+#| warning: false
+
+library(ggplot2)
+
+# prepare data (exclude zero substrate to avoid division by zero)
+lin_data <- enzyme_data[enzyme_data$substrate > 0, ]
+lin_data$inverse_s <- 1 / lin_data$substrate
+lin_data$inverse_v <- 1 / lin_data$velocity
+
+# fit linear model to transformed data
+lm_rb <- lm(inverse_v ~ inverse_s, data = lin_data)
+
+# plot
+ggplot(lin_data, aes(x = inverse_s, y = inverse_v)) +
+  geom_point(shape = 21, size = 3, fill = "white", color = "black", stroke = 0.8) +
+  geom_abline(intercept = coef(lm_rb)[1], slope = coef(lm_rb)[2], size = 1) +
+  labs(
+    x = expression(frac(1, "[S]")),
+    y = expression(frac(1, v))
+  ) +
+  theme_classic(base_family = "serif", base_size = 12)
+```
+
+The strong linear trend in the Lineweaver–Burk plot confirms the reciprocal Michaelis–Menten relationship, with the slope ($K_m/V_{max}$) and y-intercept ($1/V_{max}$) giving our parameter estimates. Slight deviation of a few low-$S$ points reflects the known amplification of experimental noise under reciprocal transformation.
+
+```{r}
+#| label: lb-estimates
+#| message: false
+#| warning: false
+
+# extract parameter estimates from linearization
+linearized_vmax <- 1 / coef(lm_rb)[1]
+linearized_km   <- linearized_vmax * coef(lm_rb)[2]
+
+cat("Vmax =", round(linearized_vmax, 1), "\n")
+cat("Km   =", round(linearized_km, 2), "\n")
+```
+
+The Lineweaver–Burk linearization yields estimates very close to the theoretical expectations and improves upon the rough grid-search values, demonstrating its utility despite known biases at low substrate concentrations.
+
+# Custom Self-Starting Function Implementation {#sec-appendix-custom-selfstart}
+
+When none of R's built-in self-starting functions apply—or when you have domain knowledge suggesting better heuristics—you can define your own *self-starting function*. This process involves three key steps:
+
+1.  **Model definition**\
+    Write the nonlinear model $f(x,\theta)$ in R exactly as you would inside `nls()`.
+
+2.  **Initialization logic**\
+    Implement a function that inspects your data and computes reasonable starting values for each parameter based on theoretical interpretation.
+
+3.  **Registration**\
+    Wrap the model and initializer into a self-starting object with `selfStart()`. Once registered, calling your model in `nls()` invokes your initializer automatically.
+
+Below is a complete example for an exponential growth model $y = y_0 \cdot e^{rx}$, which models processes like population growth, compound interest, or radioactive decay (with negative $r$) [@ritz_streibig_2008, p. 31-35]. Notice how the initialization function uses linearization (log-transformation) internally:
+
+```{r}
+#| label: custom-selfstart-exp-appendix
+#| warning: false
+#| message: false
+
+expModel <- function(x, y0, r) {
+  y0 * exp(r * x)
+}
+
+expModelInit <- function(mCall, LHS, data) {
+  xy <- sortedXyData(mCall[["x"]], LHS, data)
+
+  xy <- xy[xy[, "y"] > 0, ]
+
+  lmFit <- lm(log(xy[, "y"]) ~ xy[, "x"])
+  coefs <- coef(lmFit)
+  
+  y0 <- exp(coefs[1])  
+  r <- coefs[2] 
+  value <- c(y0 = y0, r = r)
+  
+  names(value) <- mCall[c("y0", "r")]
+  
+  return(value)
+}
+
+# register as self-starting function
+SSexp <- selfStart(expModel, expModelInit, c("y0", "r"))
+
+# generate test data
+set.seed(123)
+x_data <- seq(0, 10, length.out = 50)
+true_y0 <- 2
+true_r <- 0.3
+y_data <- true_y0 * exp(true_r * x_data) + rnorm(50, sd = 0.2)
+growth_data <- data.frame(x = x_data, y = y_data)
+
+stats::getInitial(y ~ SSexp(x, y0, r), data = growth_data)
+
+# fit the model
+exp_fit <- nls(y ~ SSexp(x, y0, r), data = growth_data)
+summary(exp_fit)
+```
+
+This custom `SSexp` function demonstrates how self-starting functions combine the analytical speed of linearization with the convenience of an automated function, providing both theoretical rigor and practical utility.
+
+# Comparative Evaluation of Starting Value Methods {#sec-starting-value-eval}
+
+Unlike linear regression, where a unique global minimum exists, nonlinear models can have multiple local minima. The choice of initial parameter estimates—the "starting values"—is therefore not a trivial step but a critical decision that significantly influences whether an optimization algorithm succeeds and how efficiently it does so.
+
+This section provides a comprehensive comparative evaluation of four common starting value approaches:
+
+1.  **Domain Knowledge**: Using heuristics based on the visual shape of the data.
+2.  **Grid Search**: Systematically exploring a predefined grid in the parameter space.
+3.  **Linearization**: Transforming the nonlinear model into a linear form to get estimates.
+4.  **Self-Starting Functions**: Using specialized routines that algorithmically determine starting values.
+
+Our evaluation focuses on two key metrics: **Parameter Accuracy** (how close the starts are to the true values) and **Computational Efficiency** (how long each method takes).
+
+## Key Ingredients of the Starting Value Evaluation
+
+-   **Four Diverse Nonlinear Models via**
+
+    ``` r
+    models <- list(
+      MM = list(formula = y ~ Vmax * x/(Km + x), ...),
+      Exp = list(formula = y ~ y0 * exp(r * x), ...),
+      Gompertz = list(formula = y ~ Asym * exp(-b2 * b3^x), ...),
+      DoseResp = list(formula = y ~ d + (a - d)/(1 + (x/c)^b), ...)
+    )
+    ```
+
+    We test across Michaelis-Menten (enzyme kinetics), Exponential (growth), Gompertz (sigmoidal growth), and 4-parameter logistic (dose-response) models to ensure broad applicability of findings.
+
+-   **Domain Knowledge Heuristics with**
+
+    ``` r
+    if (name == "MM") {
+      list(Vmax = max(dat$y, na.rm = TRUE),
+           Km   = 0.2 * max(dat$x, na.rm = TRUE))
+    }
+    ```
+
+    Simple visual inspection rules: for Michaelis-Menten, `Vmax` approximates the asymptote (max y), while `Km` is roughly at 20% where the maximal response occurs. These are fast but potentially crude estimates, see @sec-domain-knowledge for more details.
+
+-   **Systematic Grid Search via**
+
+    ``` r
+    grids <- lapply(pnames, function(p) {
+      s <- center[[p]]
+      lo <- if (is.finite(s) && s != 0) s/3 else 1e-6
+      hi <- if (is.finite(s) && s != 0) 3*s else 1
+      seq(lo, hi, length.out = 20)
+    })
+    ```
+
+    Centers grids around domain knowledge estimates, searching from 1/3× to 3× each parameter with 20 points per dimension. Evaluates RSS at all grid combinations to find the global minimum within the search space, see @sec-grid-search for more details.
+
+-   **Linearization Transformations**
+
+    ``` r
+    # For Michaelis-Menten: Lineweaver-Burk transformation
+    fit <- lm(I(1/y) ~ I(1/x), data = z)
+    Vm <- 1/coef(fit)[1]
+    Km <- coef(fit)[2] * Vm
+    ```
+
+    Classic biochemistry trick: plotting 1/y vs 1/x linearizes the MM equation. Similarly, log-transforming exponential models yields linear relationships. Only works for specific model forms. See @sec-linerization for more details.
+
+-   **Self-Starting Functions with Custom Initialization**
+
+    ``` r
+    expModelInit <- function(mCall, LHS, data) {
+      xy <- sortedXyData(mCall[["x"]], LHS, data)
+      xy <- xy[xy[, "y"] > 0, ]
+      fit <- lm(log(xy[, "y"]) ~ xy[, "x"])
+      ...
+    }
+    SSexp <- selfStart(expModel, expModelInit, c("y0", "r"))
+    ```
+
+    Combines model specification with intelligent initialization logic. The `selfStart` wrapper allows `nls()` to automatically determine starting values using model-specific algorithms. See @sec-self-starting for more details
+
+-   **Realistic Synthetic Data Generation**
+
+    ``` r
+    make_data <- function(m, n = 200, sd = 0.5) {
+      x <- seq(0, 10, length.out = n)
+      env <- c(as.list(m$true_params), list(x = x))
+      mu <- eval(m$formula[[3]], envir = env)
+      y <- mu + rnorm(n, sd = sd)
+    }
+    ```
+
+    Creates 200-point datasets with moderate noise ($\sigma$ = 0.5) using known true parameters. This controlled setup allows precise accuracy assessment since we know the ground truth.
+
+-   **Dual Performance Metrics**
+
+    ``` r
+    RelativeDeviation = abs(est - truth) / abs(truth) * 100
+    AbsoluteDeviation = abs(est - truth)
+    Time = as.numeric(difftime(t1, t0, units = "secs"))
+    ```
+
+    Captures both accuracy (how close to truth?) and efficiency (how fast?). Relative deviation normalizes across different parameter scales, while absolute deviation shows raw distances.
+
+-   **Robust Timing with `Sys.time()`**
+
+    ``` r
+    t0 <- Sys.time()
+    s  <- f(dat, nm, m)
+    t1 <- Sys.time()
+    secs <- as.numeric(difftime(t1, t0, units = "secs"))
+    ```
+
+    Wraps each starting value method to measure wall-clock time, capturing both computational complexity and implementation efficiency differences.
+
+-   **Handling Method Limitations**
+
+    ``` r
+    if (name == "Exp") {
+      z <- subset(dat, y > 0)
+      fit <- lm(log(y) ~ x, data = z)
+    }
+    ```
+
+    Linearization requires positive y-values for log transformation. The code gracefully handles these constraints by subsetting data or returning NULL when methods aren't applicable.
+
+-   **Package-Specific Self-Starters**
+
+    ``` r
+    # Base R for MM, custom for Exp, stats for Gompertz
+    ini_mm <- stats::getInitial(y ~ SSmicmen(x, Vm, K), ...)
+    ini_exp <- stats::getInitial(y ~ SSexp(x, y0, r), ...)
+    # drc package for dose-response
+    fit_dr <- drc::drm(y ~ x, data = dat_dr, fct = LL.4())
+    ```
+
+    Leverages existing R infrastructure: `stats` package provides several built-in self-starters, while specialized packages like `drc` offer domain-specific initialization routines.
+
+-   **Aggregated Performance Summary**
+
+    ``` r
+    summarize_results <- function(df) {
+      tibble(
+        MeanRelativeDeviation = mean(all$RelativeDeviation),
+        MeanAbsoluteDeviation = mean(all$AbsoluteDeviation),
+        AverageSpeed = mean(all$Time)
+      )
+    }
+    ```
+
+    Collapses detailed parameter-level results into method-level summaries, facilitating direct comparison of the four approaches across all models and parameters.
+
+In the following the full code is found:
+
+```{r implementation-details-starting-values}
+#| label: full-analysis-script
+#| echo: true
+#| warning: false
+#| eval: true
+#| message: false
+
+library(stats)
+library(drc)
+library(dplyr)
+library(tidyr)
+library(tibble)
+
+set.seed(123)
+
+models <- list(
+  MM = list(
+    formula = y ~ Vmax * x/(Km + x),
+    true_params = list(Vmax = 100, Km = 2.5)
+  ),
+  Exp = list(
+    formula = y ~ y0 * exp(r * x),
+    true_params = list(y0 = 1, r = 0.2)
+  ),
+  Gompertz = list(
+    formula = y ~ Asym * exp(-b2 * b3^x),
+    true_params = list(Asym = 5, b2 = 1.6, b3 = 0.8)
+  ),
+  DoseResp = list(
+    formula = y ~ d + (a - d)/(1 + (x/c)^b),
+    true_params = list(a = 10, d = 1, c = 5, b = 2)
+  )
+)
+
+expModel <- function(x, y0, r) y0 * exp(r * x)
+expModelInit <- function(mCall, LHS, data) {
+  xy <- sortedXyData(mCall[["x"]], LHS, data)
+  xy <- xy[xy[, "y"] > 0, ]
+  fit <- lm(log(xy[, "y"]) ~ xy[, "x"])
+  b <- coef(fit)
+  val <- c(y0 = exp(b[1]), r = b[2])
+  names(val) <- mCall[c("y0", "r")]
+  val
+}
+SSexp <- selfStart(expModel, expModelInit, c("y0", "r"))
+
+make_data <- function(m, n = 200, sd = 0.5) {
+  x <- seq(0, 10, length.out = n)
+  env <- c(as.list(m$true_params), list(x = x))
+  mu <- eval(m$formula[[3]], envir = env)
+  y <- mu + rnorm(n, sd = sd)
+  data.frame(x, y)
+}
+
+domain_starts <- function(dat, name, m) {
+  if (name == "MM") {
+    list(Vmax = max(dat$y, na.rm = TRUE),
+         Km   = 0.2 * max(dat$x, na.rm = TRUE))
+  } else if (name == "Exp") {
+    list(y0 = dat$y[1],
+         r  = log(dat$y[nrow(dat)] / dat$y[1]) / max(dat$x))
+  } else if (name == "Gompertz") {
+    A  <- 1.1 * max(dat$y, na.rm = TRUE)
+    y0 <- dat$y[which.min(dat$x)]
+    if (y0 <= 0) y0 <- 1e-6
+    list(Asym = A, b2 = -log(y0 / A), b3 = 0.5)
+  } else {
+    list(a = 1.05 * max(dat$y, na.rm = TRUE),
+         d = 0.95 * min(dat$y, na.rm = TRUE),
+         c = median(dat$x, na.rm = TRUE),
+         b = 1)
+  }
+}
+
+grid_starts <- function(dat, name, m) {
+  center <- domain_starts(dat, name, m)
+  pnames <- names(center)
+
+  grids <- lapply(pnames, function(p) {
+    s <- center[[p]]
+    lo <- if (is.finite(s) && s != 0) s/3 else 1e-6
+    hi <- if (is.finite(s) && s != 0) 3*s else 1
+    seq(lo, hi, length.out = 20)
+  })
+  names(grids) <- pnames
+
+  G <- expand.grid(grids, KEEP.OUT.ATTRS = FALSE)
+  rss <- apply(G, 1, function(row) {
+    pars <- as.list(row)
+    env  <- c(pars, as.list(dat))
+    yhat <- eval(m$formula[[3]], envir = env)
+    sum((dat$y - yhat)^2)
+  })
+  as.list(G[which.min(rss), , drop = FALSE])
+}
+
+linear_starts <- function(dat, name, m) {
+  if (name == "MM") {
+    z <- subset(dat, x > 0 & y > 0)
+    fit <- lm(I(1/y) ~ I(1/x), data = z)
+    Vm <- 1/coef(fit)[1]
+    Km <- coef(fit)[2] * Vm
+    list(Vmax = Vm, Km = Km)
+  } else if (name == "Exp") {
+    z <- subset(dat, y > 0)
+    fit <- lm(log(y) ~ x, data = z)
+    list(y0 = exp(coef(fit)[1]), r = coef(fit)[2])
+  } else {
+    NULL
+  }
+}
+
+run_eval <- function(f, which = names(models)) {
+  out <- data.frame()
+  for (nm in which) {
+    m <- models[[nm]]
+    dat <- make_data(m)
+    t0 <- Sys.time()
+    s  <- f(dat, nm, m)
+    t1 <- Sys.time()
+    secs <- as.numeric(difftime(t1, t0, units = "secs"))
+    if (!is.null(s)) {
+      for (p in names(m$true_params)) {
+        truth <- m$true_params[[p]]
+        est   <- s[[p]]
+        out <- rbind(out, data.frame(
+          Model = nm,
+          Parameter = p,
+          RelativeDeviation = abs(est - truth) / abs(truth) * 100,
+          AbsoluteDeviation = abs(est - truth),
+          Time = secs
+        ))
+      }
+    }
+  }
+  out
+}
+
+dk_results  <- run_eval(domain_starts)
+gs_results  <- run_eval(grid_starts)
+lin_results <- run_eval(linear_starts, which = c("MM", "Exp"))
+
+ss_results <- data.frame()
+
+dat_mm <- make_data(models$MM)
+t0 <- Sys.time()
+ini_mm <- try(stats::getInitial(y ~ SSmicmen(x, Vm, K), data = subset(dat_mm, x > 0)), silent = TRUE)
+t1 <- Sys.time()
+if (!inherits(ini_mm, "try-error")) {
+  tru <- models$MM$true_params
+  ss_results <- rbind(ss_results, data.frame(
+    Model = "MM", Parameter = names(tru), 
+    Time = as.numeric(difftime(t1, t0, units = "secs")),
+    RelativeDeviation = c(abs(ini_mm["Vm"] - tru$Vmax)/tru$Vmax,
+                          abs(ini_mm["K"]  - tru$Km)  /tru$Km) * 100,
+    AbsoluteDeviation = c(abs(ini_mm["Vm"] - tru$Vmax),
+                          abs(ini_mm["K"]  - tru$Km))
+  ))
+}
+
+dat_exp <- make_data(models$Exp)
+t0 <- Sys.time()
+ini_exp <- try(stats::getInitial(y ~ SSexp(x, y0, r), data = dat_exp), silent = TRUE)
+t1 <- Sys.time()
+if (!inherits(ini_exp, "try-error")) {
+  tru <- models$Exp$true_params
+  ss_results <- rbind(ss_results, data.frame(
+    Model = "Exp", Parameter = names(tru), 
+    Time = as.numeric(difftime(t1, t0, units = "secs")),
+    RelativeDeviation = c(abs(ini_exp["y0"] - tru$y0)/tru$y0,
+                          abs(ini_exp["r"]  - tru$r) /tru$r ) * 100,
+    AbsoluteDeviation = c(abs(ini_exp["y0"] - tru$y0),
+                          abs(ini_exp["r"]  - tru$r))
+  ))
+}
+
+dat_gom <- make_data(models$Gompertz)
+t0 <- Sys.time()
+ini_gom <- 
+  try(stats::getInitial(y ~ SSgompertz(x, Asym, b2, b3), data = subset(dat_gom, y > 0)), silent = TRUE)
+t1 <- Sys.time()
+if (!inherits(ini_gom, "try-error")) {
+  tru <- models$Gompertz$true_params
+  ss_results <- rbind(ss_results, data.frame(
+    Model = "Gompertz", Parameter = names(tru), 
+    Time = as.numeric(difftime(t1, t0, units = "secs")),
+    RelativeDeviation = c(abs(ini_gom["Asym"] - tru$Asym)/tru$Asym,
+                          abs(ini_gom["b2"]  - tru$b2) /tru$b2,
+                          abs(ini_gom["b3"]  - tru$b3) /tru$b3) * 100,
+    AbsoluteDeviation = c(abs(ini_gom["Asym"] - tru$Asym),
+                          abs(ini_gom["b2"]  - tru$b2),
+                          abs(ini_gom["b3"]  - tru$b3))
+  ))
+}
+
+dat_dr <- subset(make_data(models$DoseResp), x > 0)
+t0 <- Sys.time()
+fit_dr <- try(suppressWarnings(drc::drm(y ~ x, data = dat_dr, fct = LL.4())), silent = TRUE)
+ini_dr <- try(drc::getInitial(fit_dr), silent = TRUE)
+t1 <- Sys.time()
+if (!inherits(fit_dr, "try-error") && !inherits(ini_dr, "try-error")) {
+  tru <- models$DoseResp$true_params
+  rel <- c(
+    abs(ini_dr["d:(Intercept)"] - tru$a) / tru$a,
+    abs(ini_dr["c:(Intercept)"] - tru$d) / tru$d,
+    abs(ini_dr["e:(Intercept)"] - tru$c) / tru$c,
+    abs(ini_dr["b:(Intercept)"] - tru$b) / tru$b
+  ) * 100
+  absd <- c(
+    abs(ini_dr["d:(Intercept)"] - tru$a),
+    abs(ini_dr["c:(Intercept)"] - tru$d),
+    abs(ini_dr["e:(Intercept)"] - tru$c),
+    abs(ini_dr["b:(Intercept)"] - tru$b)
+  )
+  ss_results <- rbind(ss_results, data.frame(
+    Model = "DoseResp", Parameter = names(tru),
+    Time = as.numeric(difftime(t1, t0, units = "secs")),
+    RelativeDeviation = rel, AbsoluteDeviation = absd
+  ))
+}
+
+summarize_results <- function(df) {
+  if (nrow(df) == 0) return(tibble(MeanRelativeDeviation = NA_real_, MeanAbsoluteDeviation = NA_real_, AverageSpeed = NA_real_))
+  msum <- aggregate(cbind(RelativeDeviation, AbsoluteDeviation) ~ Model, data = df, FUN = mean)
+  tsum <- aggregate(Time ~ Model, data = df, FUN = mean)
+  all  <- merge(msum, tsum)
+  tibble(
+    MeanRelativeDeviation = mean(all$RelativeDeviation),
+    MeanAbsoluteDeviation = mean(all$AbsoluteDeviation),
+    AverageSpeed = mean(all$Time)
+  )
+}
+
+dk_summary  <- summarize_results(dk_results)
+gs_summary  <- summarize_results(gs_results)
+lin_summary <- summarize_results(lin_results)
+ss_summary  <- summarize_results(ss_results)
+
+```
+
+### Domain Knowledge Approach {#sec-domain-knowledge}
+
+This approach uses simple rules of thumb based on the data's appearance. For example, estimating the asymptote of a growth curve by taking the maximum observed `y` value. It is computationally instantaneous.
+
+-   **Michaelis–Menten** [@motulsky2004, p. 252]:
+    -   $V_{max}$: max$(y)$ $\Rightarrow$ assume the observed maximum rate is close to the true asymptote
+    -   $K_m$: $0.2 \times \text{max}(x)$ $\Rightarrow$ a reasonable rule is to use 20% of the maximal substrate concentration as an initial estimate
+-   **Exponential** [@ncss, p. 2]:
+    -   $y_0$ = first observed $y$ $\Rightarrow$ the model intercept at $x=0$
+    -   $r$ = $\log(y_{end}/y_0)/(x_{end}–x_0)$ $\Rightarrow$ average exponential growth rate over the observed range
+-   **Gompertz** [@ismail2003, p. 229]
+    -   $A$ (asymptote) $\approx$ $1.1 \times \text{max}(y)$ $\Rightarrow$ added some padding to the plateau (could be done in the Michaelis–Menten model as well)
+    -   $B$ = $-\log(y_{initial}/A)$ $\Rightarrow$ calculated based on the relationship between initial value and asymptote
+    -   $C$ = $0.5$ $\Rightarrow$ this remains an arbitrary choice, as estimating growth rate parameters in Gompertz models is challenging without prior knowledge of the specific application area. This is a limitation of the domain knowledge approach for complex growth models.
+-   **Dose–Response** [@motulsky2004, p. 316]
+    -   $a$, $d$ as top and bottom asymptotes with slight padding
+    -   $c$ at the median $x$ $\Rightarrow$ the midpoint of the response curve
+    -   $b$ (slope) = $1$ as a neutral guess
+
+
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Accuracy of the Domain Knowledge approach. Bars show the mean relative deviation from true parameter values."
+
+library(dplyr)
+library(ggplot2)
+
+dk_rel_dev <- dk_results %>% group_by(Model) %>% summarise(MeanDev = mean(RelativeDeviation))
+
+ggplot(dk_rel_dev, aes(x = Model, y = MeanDev, fill = Model)) +
+  geom_col(colour = "black") +
+  scale_fill_brewer(palette = "Greys") +
+  labs(
+    title = "Domain Knowledge Accuracy",
+    x = "Model Type", y = "Mean Relative Deviation (%)"
+  ) +
+  theme_classic(base_family = "serif", base_size = 12) +
+  theme(legend.position = "none")
+```
+
+### Grid Search Approach {#sec-grid-search}
+
+Grid search is a brute-force method that evaluates every combination of parameters on a predefined grid, choosing the combination with the lowest RSS.
+
+-   Parameter ranges are intentionally wide to account for uncertainty in initial estimates
+-   Lower bounds typically extend to $1/3$ of data-derived estimates to capture potentially smaller values
+-   Upper bounds extend to $3 \times$ data-derived estimates to account for potentially larger values
+-   This asymmetric range ($1/3 \times$ to $3 \times$) acknowledges that many biological and physical parameters have greater uncertainty in their upper bounds
+-   Model-specific considerations adapt these ranges where appropriate
+
+For example, in the Michaelis-Menten model, $V_{max}$ ranges from $1/3$ to $3 \times$ the observed maximum y-value, reflecting the possibility that the true maximum rate could be substantially higher than observed in a limited dataset. For each parameter, the grid spacing is designed to provide adequate resolution while keeping computational requirements reasonable.
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Performance of the Grid Search approach."
+
+library(dplyr)
+library(ggplot2)
+
+gs_acc <- gs_results %>% group_by(Model) %>% summarise(Value = mean(RelativeDeviation)) %>% mutate(Metric = "Accuracy (%)")
+gs_time <- gs_results %>% group_by(Model) %>% summarise(Value = mean(Time)) %>% mutate(Metric = "Time (s)")
+gs_plot_data <- rbind(gs_acc, gs_time)
+
+ggplot(gs_plot_data, aes(x = Model, y = Value, fill = Model)) +
+  geom_col(colour = "black") +
+  scale_fill_brewer(palette = "Greys") +
+  facet_wrap(~Metric, scales = "free_y") +
+  labs(
+    title = "Grid Search: Accuracy vs. Time",
+    x = "Model Type", y = "Value"
+  ) +
+  theme_classic(base_family = "serif", base_size = 12) +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Linearization Approach {#sec-linerization}
+
+This clever technique transforms a nonlinear model into a linear one, allowing parameter estimation with fast, simple linear regression. This is only possible for certain models, such as the Michaelis-Menten and Exponential models in our set. See @sec-appendix-linearization for a derivation of the Lineweaver-Burk Transformation.
+
+-   **Lineweaver–Burk** for MM: $1/y$ vs $1/x$ $\Rightarrow$ linear in $1/V_{max}$ and $K_m/V_{max}$
+-   **Log‐transform** for Exp: $\log(y)$ vs $x$ $\Rightarrow$ intercept=$\log(y_0)$, slope=$r$
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Performance of the Linearization approach for applicable models."
+
+library(dplyr)
+library(ggplot2)
+
+lin_acc <- lin_results %>% group_by(Model) %>% summarise(Value = mean(RelativeDeviation)) %>% mutate(Metric = "Accuracy (%)")
+lin_time <- lin_results %>% group_by(Model) %>% summarise(Value = mean(Time)) %>% mutate(Metric = "Time (s)")
+lin_plot_data <- rbind(lin_acc, lin_time)
+
+ggplot(lin_plot_data, aes(x = Model, y = Value, fill = Model)) +
+  geom_col(colour = "black") +
+  scale_fill_brewer(palette = "Greys") +
+  facet_wrap(~Metric, scales = "free_y") +
+  labs(
+    title = "Linearization: High Speed and Good Accuracy",
+    x = "Model Type", y = "Value"
+  ) +
+  theme_classic(base_family = "serif", base_size = 12) +
+  theme(legend.position = "none")
+```
+
+### Self-Starting Functions {#sec-self-starting}
+
+Self-starting functions are specialized routines, often built into statistical software, that encapsulate an algorithm for finding starting values automatically. Many internally use linearization or other data-driven heuristics.
+
+Since a built-in self-starter for a simple exponential model `(y ~ y0 * exp(r*x))` is not available in base R, we have defined a custom one in @sec-custom-selfstart, SSexp. This function essentially automates the process of finding starting values through log-linearization, making it a true self-starting component for the purposes of this comparison.
+
+-   `SSmicmen()` for Michaelis-Menten models
+-   `SSexp()` for exponential growth/decay
+-   `SSgompertz()` for Gompertz growth
+
+For the Dose-Response model, we use the self-starting function from the `drc` package. If any self-starter fails, we do not fall back to other methods, maintaining clear boundaries between approaches for fair evaluation.
+
+```{r}
+# --- Plotting Code ---
+#| label: fig-ss-performance-plot
+#| warning: false
+#| message: false
+#| fig-cap: "Performance comparison of the self-starting functions across different models."
+
+ss_plot_data <- ss_results %>%
+  group_by(Model) %>%
+  summarise(
+    `Accuracy (%)` = mean(RelativeDeviation, na.rm = TRUE),
+    `Time (s)` = first(Time)
+  ) %>%
+  pivot_longer(
+    cols = c(`Accuracy (%)`, `Time (s)`),
+    names_to = "Metric",
+    values_to = "Value"
+  )
+
+ggplot(ss_plot_data, aes(x = Model, y = Value, fill = Model)) +
+  geom_col(colour = "black") +
+  scale_fill_brewer(palette = "Greys") +
+  facet_wrap(~Metric, scales = "free_y") +
+  labs(
+    title = "Self-Starting Functions: The Best of Both Worlds",
+    x = "Model Type", y = "Value"
+  ) +
+  theme_classic(base_family = "serif", base_size = 12) +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+```
+
+# Comparative Evaluation of Optimization Algorithms with Varying Initial Values {#sec-algorithm-perf-benchmark}
+
+Having established how starting values influence parameter estimates, we now turn to a practical comparison of different optimization philosophies. These algorithms determine how the parameter search proceeds from the initial estimates, navigating the complex landscape of the sum of squared residuals. The goal is to understand the real-world trade-offs between algorithms **specialized** for curve fitting and **general-purpose** optimizers when applied to the same non-linear regression problems.
+
+The theoretical section explored different optimization approaches. Here, we test their practical implementations in R:
+
+1.  **Gauss-Newton**: A specialized least-squares method using the `H = J^T J` approximation to avoid second derivatives. Implemented via `nls(..., algorithm = "default")`.
+
+2.  **Levenberg-Marquardt**: A highly robust specialist that adds adaptive damping to the Gauss-Newton approach. Implemented via `minpack.lm::nlsLM()`.
+
+3.  **PORT**: A sophisticated specialist that incorporates a trust-region methodology. Implemented via `nls(..., algorithm = "port")`.
+
+4.  **Newton-Type (Quasi-Newton) Method**: The classic Newton's method theoretically uses the full Hessian matrix of second derivatives. However, deriving this matrix analytically for every model is impractical. Therefore, we represent this second-order philosophy using **`stats::nlm()`**, a powerful **general-purpose optimizer**. `nlm()` is a **quasi-Newton** method that works for any function, avoiding analytical derivatives by *numerically approximating* the full Hessian at each step [@dennis1996]
+
+## Evaluation Principles and Methodology
+
+A robust comparative evaluation of nonlinear regression methods requires some key principles:
+
+1.  **Reproducibility**: All comparisons must be conducted under controlled conditions with fixed random seeds to ensure results can be replicated.
+2.  **Fair Comparison**: Methods should be compared on equal footing, with consistent computational resources, convergence criteria, and problem formulations.
+3.  **Comprehensive Assessment**: Evaluation should consider several dimensions, including computational efficiency, convergence reliability, and estimation accuracy.
+4.  **Model Diversity**: Testing should span a range of nonlinear model types with varying complexity, parameter dimensionality, and nonlinearity characteristics.
+5.  **Statistical Rigor**: Results should be based on multiple replications to account for random variation.
+
+Following these principles ensures that our comparisons yield meaningful insights that can guide practical decision-making when applying nonlinear regression in real-world scenarios.
+
+## Experimental Design for Algorithm Comparison
+
+Our algorithm evaluation follows a rigorous experimental design:
+
+1.  **Controlled Testing Environment**: All algorithms face identical challenges with the same datasets, starting values, and convergence criteria.
+
+2.  **Performance Metrics**: We assess multiple dimensions, including:
+
+    -   **Convergence Rate**: What proportion of runs succeed, and to what type of optimum (correct vs. wrong)?
+    -   **Parameter Accuracy**: For successful runs, how close are the final estimates to the true values? We will use the **median** error to get a robust measure of typical performance.
+    -   **Computational Efficiency**: Time required to reach convergence.
+
+3.  **Diverse Model Set**: Testing spans the same four models, providing a range of complexity.
+
+4.  **Statistical Rigor**: Each algorithm-model combination undergoes 30 replications with different random noise patterns.
+
+5.  **Varying Starting Values**: We deliberately alter starting values by **5%, 10%, 25%, 50%, and 100%** to test robustness across a wide range of conditions.
+
+6.  **Iteration Limits**: We provide the same iteration limit to every algorithm (100 iterations).
+
+This comprehensive approach enables a fair and practical assessment of each algorithm's strengths and weaknesses.
+
+## Key Ingredients of the Optimization Methods Comparison
+
+-   **Four Distinct Optimization Algorithms via**
+
+    ``` r
+    methods <- c("GaussNewton", "LM", "PORT", "Newton")
+    ```
+
+    Tests Gauss-Newton (default `nls`), Levenberg-Marquardt (`nlsLM` from minpack.lm), PORT (bounded optimization in `nls`), and Newton's method (`nlm`). Each represents different trade-offs between speed, robustness, and convergence properties.
+
+-   **Systematic Starting Value Perturbation**
+
+    ``` r
+    perturb_starts <- function(true_params, dev) {
+      lapply(true_params, function(p) p * (1 + sample(c(-1, 1), 1) * dev / 100))
+    }
+    deviation_levels <- c(5, 10, 25, 50, 100)
+    ```
+
+    Tests robustness by randomly perturbing true parameters by ±5% to ±100%. The `sample(c(-1, 1), 1)` ensures each parameter is randomly pushed either up or down, testing different regions of parameter space.
+
+-   **Unified Fitting Interface with Method Dispatch**
+
+    ``` r
+    fit_once <- function(method, spec, data, start_list) {
+      if (method == "GaussNewton") {
+        nls(spec$formula, data = data, start = start_list, ...)
+      } else if (method == "LM") {
+        nlsLM(spec$formula, data = data, start = start_list, ...)
+      } ...
+    }
+    ```
+
+    Wraps different optimization functions behind a common interface. Note `warnOnly = TRUE` for `nls` prevents convergence failures from stopping execution, while `nlsLM` handles failures internally.
+
+-   **Method-Specific Convergence Checking**
+
+    ``` r
+    converged_ok <- function(fit, method) {
+      if (inherits(fit, "try-error")) return(FALSE)
+      if (method == "Newton") return(fit$code %in% 1:3)
+      if (!is.null(fit$convInfo) && !is.null(fit$convInfo$isConv)) 
+        return(isTRUE(fit$convInfo$isConv))
+      is.finite(sum(resid(fit)^2))
+    }
+    ```
+
+    Different optimizers signal convergence differently: `nlm` uses return codes 1-3 for success, `nls` methods use `convInfo$isConv`, and as a fallback, we check for finite RSS (catches numerical overflow/underflow).
+
+-   **Newton's Method via General Optimizer**
+
+    ``` r
+    rss <- function(par) {
+      names(par) <- pnames
+      yhat <- eval(spec$formula[[3]], envir = c(as.list(par), list(x = data$x)))
+      sum((data$y - yhat)^2)
+    }
+    nlm(rss, p = start_vec, iterlim = 100)
+    ```
+
+    Since `nlm` minimizes arbitrary functions, we construct the RSS objective explicitly. This technique, which involves applying the `eval` function to the right-hand side of the formula object, enables a consistent model specification to be used across different fitting functions.
+
+-   **Realistic Synthetic Data with Moderate Noise**
+
+    ``` r
+    n_points <- 150
+    noise_sd <- 1.5
+    y <- mu + rnorm(n_points, sd = noise_sd)
+    ```
+
+    150 data points provide sufficient information for stable fits, while $\sigma$ = 1.5 creates challenging but realistic noise levels that stress-test convergence without being pathological.
+
+-   **Percentage Parameter Error Metric**
+
+    ``` r
+    param_err_pct <- function(estimated, truth) {
+      e <- unlist(estimated)[names(truth)]
+      t <- unlist(truth)
+      mean(abs(e - t) / pmax(abs(t), 1e-8)) * 100
+    }
+    ```
+
+    Computes mean absolute percentage error across all parameters. The `pmax(abs(t), 1e-8)` guards against division by zero for parameters near zero. Reordering via `[names(truth)]` ensures correct parameter matching.
+
+-   **Robust Error Handling Throughout**
+
+    ``` r
+    fit <- try(fit_once(m, spec, dat, start_list), silent = TRUE)
+    ok <- converged_ok(fit, m)
+    rss <- if (ok) rss_of(fit, m, dat, spec) else NA
+    perr <- if (ok) param_err_pct(...) else NA
+    ```
+
+    Every fit is wrapped in `try()` to catch errors. Failed fits get NA values for RSS and parameter error, allowing the simulation to continue while tracking failure rates.
+
+-   **Method-Agnostic Result Extraction**
+
+    ``` r
+    params_of <- function(fit, method, spec, start_list) {
+      if (method == "Newton") {
+        est <- fit$estimate
+        names(est) <- names(spec$true_params)
+        est
+      } else {
+        coef(fit)
+      }
+    }
+    ```
+
+    Handles the different ways optimizers return parameters: `nlm` uses `$estimate` while `nls`-based methods use `coef()`. Ensures parameter names are preserved for Newton's method.
+
+-   **Iteration Limits for Fair Comparison**
+
+    ``` r
+    control = nls.control(maxiter = 100, warnOnly = TRUE)
+    control = nls.lm.control(maxiter = 100)
+    nlm(rss, p = start_vec, iterlim = 100)
+    ```
+
+    All methods capped at 100 iterations to ensure fair speed comparisons. Methods that converge faster get credit, while slow convergers are penalized equally.
+
+-   **Full Factorial Design**
+
+    ``` r
+    for (i in seq_len(reps)) {
+      for (model_name in names(models)) {
+        for (dev in deviation_levels) {
+          for (m in methods) {
+            # Fit and record
+    ```
+
+    Tests all combinations: 30 reps × 4 models × 5 deviation levels × 4 methods = 2,400 total fits. This systematic approach reveals method × model × difficulty interactions.
+
+-   **Comprehensive Performance Tracking**
+
+    ``` r
+    results[[length(results) + 1]] <- data.frame(
+      Rep = i, Model = model_name, Method = m, Deviation = dev,
+      Converged = ok,
+      ElapsedTime = as.numeric(difftime(t1, t0, units = "secs")),
+      FinalRSS = rss,
+      ParamError = perr
+    )
+    ```
+
+    Records convergence status, computation time, final RSS (for checking solution quality), and parameter accuracy. This multi-faceted view reveals whether methods trade accuracy for speed or robustness.
+
+In the following, the entire code chunk is seen. It is also evaluated, since more specific results are shown thereafter.
+
+```{r setup-and-simulation}
+#| echo: true
+#| eval: true
+#| warning: false
+#| message: false
+
+library(minpack.lm)
+library(dplyr)
+
+set.seed(123)
+
+models <- list(
+  MM = list(
+    formula = y ~ Vmax * x / (Km + x),
+    true_params = list(Vmax = 100, Km = 2.5)
+  ),
+  Exp = list(
+    formula = y ~ y0 * exp(r * x),
+    true_params = list(y0 = 1, r = 0.2)
+  ),
+  Gompertz = list(
+    formula = y ~ Asym * exp(-b2 * b3^x),
+    true_params = list(Asym = 5, b2 = 1.6, b3 = 0.8)
+  ),
+  DoseResp = list(
+    formula = y ~ d + (a - d) / (1 + (x / c)^b),
+    true_params = list(a = 10, d = 1, c = 5, b = 2)
+  )
+)
+
+reps <- 30
+deviation_levels <- c(5, 10, 25, 50, 100)
+methods <- c("GaussNewton", "LM", "PORT", "Newton")
+n_points <- 150
+noise_sd <- 1.5
+
+make_data <- function(spec) {
+  x <- seq(0.1, 15, length.out = n_points)
+  mu <- eval(spec$formula[[3]], envir = c(spec$true_params, list(x = x)))
+  y <- mu + rnorm(n_points, sd = noise_sd)
+  data.frame(x = x, y = y)
+}
+
+perturb_starts <- function(true_params, dev) {
+  lapply(true_params, function(p) p * (1 + sample(c(-1, 1), 1) * dev / 100))
+}
+
+param_err_pct <- function(estimated, truth) {
+  e <- unlist(estimated)[names(truth)]
+  t <- unlist(truth)
+  mean(abs(e - t) / pmax(abs(t), 1e-8)) * 100
+}
+
+fit_once <- function(method, spec, data, start_list) {
+  if (method == "GaussNewton") {
+    nls(spec$formula, data = data, start = start_list,
+        control = nls.control(maxiter = 100, warnOnly = TRUE))
+  } else if (method == "LM") {
+    nlsLM(spec$formula, data = data, start = start_list,
+          control = nls.lm.control(maxiter = 100))
+  } else if (method == "PORT") {
+    nls(spec$formula, data = data, start = start_list, algorithm = "port",
+        control = nls.control(maxiter = 100, warnOnly = TRUE))
+  } else if (method == "Newton") {
+    start_vec <- unlist(start_list)
+    pnames <- names(start_vec)
+    rss <- function(par) {
+      names(par) <- pnames
+      yhat <- eval(spec$formula[[3]], envir = c(as.list(par), list(x = data$x)))
+      sum((data$y - yhat)^2)
+    }
+    nlm(rss, p = start_vec, iterlim = 100)
+  }
+}
+
+converged_ok <- function(fit, method) {
+  if (inherits(fit, "try-error")) return(FALSE)
+  if (method == "Newton") return(fit$code %in% 1:3)
+  if (!is.null(fit$convInfo) && !is.null(fit$convInfo$isConv)) return(isTRUE(fit$convInfo$isConv))
+  is.finite(sum(resid(fit)^2))
+}
+
+rss_of <- function(fit, method, data, spec) {
+  if (method == "Newton") return(fit$minimum)
+  sum(resid(fit)^2)
+}
+
+params_of <- function(fit, method, spec, start_list) {
+  if (method == "Newton") {
+    est <- fit$estimate
+    names(est) <- names(spec$true_params)
+    est
+  } else {
+    coef(fit)
+  }
+}
+
+results <- list()
+
+for (i in seq_len(reps)) {
+  for (model_name in names(models)) {
+    spec <- models[[model_name]]
+    dat <- make_data(spec)
+
+    for (dev in deviation_levels) {
+      start_list <- perturb_starts(spec$true_params, dev)
+
+      for (m in methods) {
+        t0 <- Sys.time()
+        fit <- try(fit_once(m, spec, dat, start_list), silent = TRUE)
+        t1 <- Sys.time()
+
+        ok <- converged_ok(fit, m)
+        rss <- if (ok) rss_of(fit, m, dat, spec) else NA
+        perr <- if (ok) param_err_pct(params_of(fit, m, spec, start_list), spec$true_params) else NA
+
+        results[[length(results) + 1]] <- data.frame(
+          Rep = i, Model = model_name, Method = m, Deviation = dev,
+          Converged = ok,
+          ElapsedTime = as.numeric(difftime(t1, t0, units = "secs")),
+          FinalRSS = rss,
+          ParamError = perr
+        )
+      }
+    }
+  }
+}
+
+results_df <- bind_rows(results)
+
+```
+
+```{r}
+#| echo: true
+#| fig-width: 8
+#| fig-height: 5
+
+library(dplyr)
+library(ggplot2)
+
+summary_conv <- results_df %>%
+  group_by(Model, Method, Deviation) %>%
+  summarise(ConvRate = mean(Converged) * 100, .groups = 'drop')
+
+
+ggplot(summary_conv, aes(x = factor(Deviation), y = ConvRate, color = Method, linetype = Method, group = Method)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  facet_wrap(~Model) +
+  # Force the y-axis to be from 0 to 100 to ensure everything is on the plot.
+  scale_y_continuous(limits = c(0, 100)) +
+  labs(
+    title = "Algorithm Convergence Rate vs. Initial Deviation",
+    x = "Initial Parameter Deviation (%)",
+    y = "Convergence Rate (%)"
+  ) +
+  # Add a specific scale for linetype for clarity
+  scale_linetype_manual(values = c("solid", "dashed", "dotted", "dotdash")) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom", strip.text = element_text(face = "bold"))
+
+
+```
+Convergence declines as starting values move farther from truth, with Gauss–Newton and PORT most sensitive—especially on DoseResp and Gompertz. LM and Newton stay near-perfect on Exp and MM, and Newton is notably robust on Gompertz even at 100% deviation
+
+## Results
+
+```{r}
+library(dplyr)
+
+gauss_newton_performance <- results_df %>%
+  filter(Method == "GaussNewton") %>%
+  group_by(Model) %>%
+  summarise(
+    TotalRuns = n(),
+    SuccessfulRuns = sum(Converged),
+    ConvergenceRate = mean(Converged) * 100
+  )
+
+print(gauss_newton_performance)
+```
+
+Across 150 runs per model, Gauss–Newton converges 72% (DoseResp), 89% (Exp), 81% (Gompertz), and 90% (MM). This pattern highlights GN’s vulnerability on DoseResp and Gompertz relative to the easier Exp/MM surfaces
+
+### Accuracy
+
+```{r}
+#| echo: false
+#| fig-width: 10
+#| fig-height: 6
+
+# using median
+summary_median_accuracy <- results_df %>%
+  filter(Converged == TRUE) %>%
+  group_by(Model, Method, Deviation) %>%
+  summarise(MedianParamError = median(ParamError, na.rm = TRUE), .groups = 'drop')
+
+ggplot(summary_median_accuracy, aes(x = factor(Deviation), y = MedianParamError, color = Method, group = Method)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  facet_wrap(~Model, scales = "free_y") +
+  scale_y_log10() +
+  labs(
+    title = "Median Parameter Accuracy for Converged Solutions",
+    subtitle = "Using the median reveals the typical performance by ignoring outliers.",
+    x = "Initial Parameter Deviation (%)",
+    y = "Median Relative Parameter Error (%)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom", strip.text = element_text(face = "bold"))
+```
+
+For runs that do converge, typical (median) parameter error is flat at small/moderate deviations and worsens mainly at extreme (100%) misspecification. The largest degradations appear for Newton on DoseResp and Gompertz, whereas LM/PORT keep median errors comparatively low (note the log-scale y-axis)
+
+### False Minimum Convergence {#sec-false-minimum}
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+
+rss_thresholds <- results_df %>%
+  filter(Method == "LM", Deviation == 25, Converged == TRUE) %>% # 25% deviation is wrong basin
+  group_by(Model) %>%
+  # Define threshold as 5x the median RSS of good runs to be generous
+  summarise(Threshold = 5 * median(FinalRSS, na.rm = TRUE))
+
+classified_results <- results_df %>%
+  left_join(rss_thresholds, by = "Model") %>%
+  mutate(
+    ConvergenceType = case_when(
+      !Converged ~ "Did Not Converge",
+      Converged & FinalRSS <= Threshold ~ "Correct Optimum",
+      Converged & FinalRSS > Threshold  ~ "Wrong Optimum",
+      TRUE ~ "Other" 
+    )
+  ) %>%
+  mutate(ConvergenceType = factor(
+    ConvergenceType, 
+    levels = c("Correct Optimum", "Wrong Optimum", "Did Not Converge")
+  ))
+
+# --- 2. Summarize for Plotting ---
+summary_breakdown <- classified_results %>%
+  group_by(Method, Deviation, ConvergenceType) %>%
+  summarise(Count = n(), .groups = 'drop')
+
+
+# --- 3. Generate the Plot ---
+ggplot(summary_breakdown, aes(x = factor(Deviation), y = Count, fill = ConvergenceType)) +
+  geom_col(position = "fill", alpha = 0.9) + 
+  facet_wrap(~Method, nrow = 1) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(
+    values = c(
+      "Correct Optimum" = "#2ca02c",  # Green
+      "Wrong Optimum" = "#ff7f0e",    # Orange
+      "Did Not Converge" = "#d3d3d3" # Grey
+    )
+  ) +
+  labs(
+    title = "Breakdown of Convergence Outcomes by Algorithm",
+    subtitle = "This plot reveals how often algorithms converge to a poor solution.",
+    x = "Initial Parameter Deviation (%)",
+    y = "Percentage of Runs"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom", 
+    strip.text = element_text(face = "bold", size = 12),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+```
+Most Gauss–Newton and PORT failures are outright non-convergence rather than convergence to a high-RSS basin. Newton shows a small but visible share of wrong-optimum outcomes at 50–100% deviation, while LM minimizes erroneous-basin convergences overall.
+
+### Convergence Speed
+
+```{r}
+#| echo: false
+#| fig-width: 10
+#| fig-height: 6
+
+summary_time <- results_df %>%
+  filter(Converged == TRUE) %>%
+  group_by(Model, Method, Deviation) %>%
+  summarise(MeanTime = mean(ElapsedTime, na.rm = TRUE) * 1000, .groups = 'drop') # in ms
+
+# Plot
+ggplot(summary_time, aes(x = factor(Deviation), y = MeanTime, color = Method, group = Method)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  facet_wrap(~Model, scales = "free_y") +
+  labs(
+    title = "Computational Efficiency (Time to Converge)",
+    x = "Initial Parameter Deviation (%)",
+    y = "Mean Execution Time (ms)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom", strip.text = element_text(face = "bold"))
+```
+LM is consistently the fastest and most stable across models, whereas PORT is slowest and slows further as deviation increases. Gauss–Newton and Newton are mid-range on speed but can show occasional spikes.

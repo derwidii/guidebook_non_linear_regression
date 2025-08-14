@@ -1,0 +1,10 @@
+# Notation {.unnumbered}
+
+Throughout this thesis, the following conventions for mathematical symbols and notation are used:
+
+- **Vectors** appear in **bold** (e.g., $\mathbf{x}$, $\mathbf{y}$) to distinguish them from scalar quantities.
+- **Matrices** may also appear in **bold capital letters** (e.g., $\mathbf{X}$, $\mathbf{H}$).
+- **Parameters** are denoted by Greek letters (e.g., $\theta$, $\alpha$, $\beta$) to indicate unknown constants that we want to estimate.  In the main text, $\beta$ frequently denotes generic parameters in a model’s theoretical derivation. In the accompanying R code examples, you may see the parameter vector referred to as $\beta$ or a single symbol such as $k$.
+- **Indices** such as $i$ or $j$ usually run from $1$ to $n$ (the sample size) or to another specified bound, depending on context.
+- **Functions** may be denoted by lowercase letters (e.g., $f$) or named functions (e.g., $\sin$, $\exp$) where appropriate.
+- **Random errors** or **noise** terms often appear as $\epsilon_i$.

@@ -1,0 +1,705 @@
+---
+title: "Extensions to Nonlinear Regression"
+---
+
+```{r, echo = FALSE}
+source("setup.R")
+```
+
+This chapter extends the foundational concepts from Chapters 2-6 to address three critical limitations of standard nonlinear least squares. We explore robust estimation for outlier-contaminated data, mixed-effects models for grouped observations with correlated errors, and neural networks when functional forms remain unknown. Each extension represents a fundamental trade-off: robustness versus efficiency, model complexity versus parsimony, and flexibility versus interpretability. 
+
+```{=latex}
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Theory}
+\thispagestyle{empty}
+\vspace*{\fill}
+\begin{center}
+ \Huge\bfseries Theory
+\end{center}
+\vspace*{\fill}
+
+\clearpage
+```
+
+## Robust Nonlinear Regression {#sec-robust-nonlinear}
+
+Standard nonlinear least squares, as detailed in @sec-nonlinear-least-square, minimizes squared residuals-yielding efficient estimates under normality but extreme sensitivity to outliers [@huber2009]. Even one contaminated observation can arbitrarily bias parameters, necessitating robust alternatives. 
+
+### When to Choose Robust Methods
+
+Consider robust regression when:
+
+1.  **Data Quality Uncertain**: Field measurements, manual data entry, or instrument malfunctions may introduce outliers
+2.  **Heavy-Tailed Distributions**: Biological or economic phenomena often exhibit occasional extreme values
+3.  **High-Stakes Decisions**: When parameter estimates drive critical decisions, robustness provides insurance against anomalous data
+4.  **Exploratory Analysis**: Comparing robust and standard estimates reveals influential observations
+
+The cost of robustness is statistical efficiency-robust estimators require more data to achieve the same precision as least squares under ideal conditions. This efficiency loss represents the premium for protection against contamination.
+
+### Breakdown of Classical Estimators
+
+The breakdown point quantifies an estimator's contamination resistance-specifically, the smallest fraction of observations that, when arbitrarily corrupted, can cause unbounded bias. For nonlinear least squares, this fraction equals $1/n$, where $n$ denotes sample size [@bates_watts_1988, p. 6, 53]. This extreme vulnerability means a single outlier among 100 observations can completely distort conclusions.
+
+The influence function formalizes this sensitivity [@maronna2019, p. 55; @hampel1974, p. 384] :
+
+$$IF(\mathbf{x}_0, y_0; T, F) = \lim_{\epsilon \to 0} \frac{T\big((1-\epsilon)F + \epsilon \delta_{(\mathbf{x}_0, y_0)}\big) - T(F)}{\epsilon}$$ {#eq-influence}
+
+where $T$ is the estimator functional, $F$ the data-generating distribution, and $\delta_{(\mathbf{x}_0, y_0)}$ a point mass at the contaminating observation. For least squares, the IF is unbounded in the response direction (and grows with leverage through $\nabla f$), confirming unlimited sensitivity to outliers—as observed in the heteroscedastic enzyme kinetics example (@sec-heteroscedastic-enzyme-2).
+
+### M-Estimators and Their Properties
+
+M-estimators generalize maximum likelihood by replacing the squared loss with a bounded $\rho$-function that limits outlier influence [@maronna2019, p. 38]:
+
+$$\hat{\boldsymbol{\beta}}_M = \arg\min_{\boldsymbol{\beta}} \sum_{i=1}^n \rho\left(\frac{y_i - f(\mathbf{x}_i; \boldsymbol{\beta})}{\sigma}\right)$$ {#eq-m-estimator}
+
+The scale parameter $\sigma$ standardizes residuals, typically estimated robustly via the median absolute deviation (MAD). The choice of $\rho$-function embodies the trade-off between efficiency and robustness-gentler functions preserve more information from borderline observations but offer less protection against extreme outliers [@huber2009, p. 5] .
+
+Taking derivatives yields the estimating equations [@maronna2019, p. 39]:
+
+$$\sum_{i=1}^n \psi\left(\frac{y_i - f(\mathbf{x}_i; \boldsymbol{\beta})}{\sigma}\right) \nabla_{\boldsymbol{\beta}} f(\mathbf{x}_i; \boldsymbol{\beta}) = \mathbf{0}$$ {#eq-m-estimator-deriv}
+
+where $\psi = \rho'$ represents the influence function. Tukey's bisquare exemplifies a redescending $\psi$-function-observations beyond a threshold receive zero weight:
+
+$$\psi(r) = \begin{cases} r[1-(r/k)^2]^2 & |r| \leq k \\ 0 & |r| > k \end{cases}$$ {#eq-tukey-bisquare}
+
+The tuning constant $k = 4.68$ achieves 95% asymptotic efficiency under normality while providing substantial outlier protection [@maronna2019, p. 31]. This specific value represents decades of empirical optimization-balancing the competing demands of retaining information from good observations while rejecting contamination.
+
+### MM-Estimators: Combining Breakdown and Efficiency
+
+MM-estimators represent the state-of-the-art in robust regression, achieving seemingly incompatible goals through a two-stage procedure [@yohai1987]:
+
+1.  **S-estimation**: Obtain initial estimates with 50% breakdown point-half the data can be corrupted without destroying the estimate
+2.  **M-estimation**: Refine for efficiency while maintaining high breakdown
+
+Under the regularity conditions from @sec-regularity-conditions, MM-estimators satisfy [@maronna2019, p. 71]:
+
+$$\sqrt{n}(\hat{\boldsymbol{\beta}}_{MM} - \boldsymbol{\beta}_0) \xrightarrow{d} N(\mathbf{0}, \mathbf{A}^{-1}\mathbf{B}\mathbf{A}^{-1})$$ {#eq-mm-asymptotic}
+
+where $\mathbf{A} = E[\psi'(r)\nabla f \nabla f^T]$ and $\mathbf{B} = E[\psi^2(r)\nabla f \nabla f^T]$. This sandwich covariance structure, more complex than the standard $(J^TJ)^{-1}$ from least squares, reflects the price of robustness-standard errors require careful computation accounting for the influence function's properties.
+
+## Grouped Data and Nonlinear Mixed-Effects Models
+
+Real datasets frequently violate the independence assumption central to standard regression. When observations cluster within groups-patients within hospitals, measurements within experimental units, trees within orchards-the resulting correlation invalidates standard inference. Mixed-effects models address this fundamental challenge by explicitly modeling the hierarchical structure.
+
+### When Mixed-Effects Models Become Essential
+
+Consider mixed-effects models when [@pinheiro2000]:
+
+1.  **Natural Grouping Exists**: Data inherently clusters (repeated measures, family studies, multicenter trials)
+2.  **Group-Specific Variation Matters**: Between-group differences exceed within-group variation
+3.  **Inference Targets Both Levels**: Interest lies in both population averages and group-specific effects
+4.  **Unbalanced Designs**: Groups contain varying numbers of observations
+
+The critical insight: Ignoring grouping can leave point estimates biased in nonlinear models (since $E\{f(x;\beta+b)\}\neq f(x;\beta)$) and will typically underestimate uncertainty [@pinheiro2000].
+
+### The Independence Violation and Its Consequences
+
+Consider grouped data where observations within groups correlate [@pinheiro2000, pp. 306-311] . The covariance structure becomes:
+
+$$\text{Cov}(y_{ij}, y_{i'j'}) = \begin{cases} \sigma^2 + \tau^2 & i = i', j = j' \\ \tau^2 & i \neq i', j = j' \\ 0 & j \neq j' \end{cases}$$
+
+where $\sigma^2$ represents within-group variance and $\tau^2$ between-group variance. Standard NLS assumes $\tau^2 = 0$, yielding variance estimates:
+
+$$\text{Var}(\hat{\boldsymbol{\beta}}_{NLS}) = \sigma^2 (\mathbf{J}^T\mathbf{J})^{-1}$$
+
+The true variance under grouping equals:
+
+$$\text{Var}(\hat{\boldsymbol{\beta}}_{true}) = (\mathbf{J}^T\mathbf{J})^{-1}\mathbf{J}^T\mathbf{V}\mathbf{J}(\mathbf{J}^T\mathbf{J})^{-1}$$
+
+where $\mathbf{V}$ incorporates the correlation structure. The ratio $\text{Var}(\hat{\boldsymbol{\beta}}_{true})/\text{Var}(\hat{\boldsymbol{\beta}}_{NLS})$ can exceed 10 when intraclass correlation $\rho = \tau^2/(\sigma^2 + \tau^2)$ is substantial, explaining why ignoring grouping yields spuriously significant results.
+
+### Group-Specific Parameterization
+
+Consider data from $K$ groups with the $j$-th containing $n_j$ observations. The naive approach fits separate models per group:
+
+$$y_{ij} = f(\mathbf{x}_{ij}; \boldsymbol{\beta}_j) + \epsilon_{ij}, \quad i = 1, \ldots, n_j, \quad j = 1, \ldots, K$$ {#eq-group-specific}
+
+For Michaelis-Menten kinetics (@sec-michaelis-menten), this yields group-specific velocities and affinities [@ritz_streibig_2008, p. 111] :
+
+$$y_{ij} = \frac{V_{max,j} \cdot x_{ij}}{K_{m,j} + x_{ij}} + \epsilon_{ij}$$ {#eq-mm-group}
+
+This introduces $K \times p$ parameters for $p$-parameter models. With 10 groups and the 4-parameter Hill equation, we estimate 40 parameters-often exceeding available data. Moreover, this approach treats groups as completely independent, discarding valuable information about population patterns.
+
+### Nonlinear Mixed-Effects Models: The Hierarchical Solution
+
+Mixed-effects models elegantly balance flexibility with parsimony by decomposing parameters into shared and group-specific components:
+
+$$\boldsymbol{\beta}_j = \boldsymbol{\beta} + \mathbf{b}_j, \quad \mathbf{b}_j \sim N(\mathbf{0}, \mathbf{D})$$ {#eq-mixed-decomp}
+
+where $\boldsymbol{\beta}$ represents fixed effects (population average) and $\mathbf{b}_j$ captures random effects (group deviations) with covariance $\mathbf{D}$. This hierarchical structure embodies the statistical principle of "borrowing strength". Groups with sparse data are pulled toward the population mean, while data-rich groups maintain their individual characteristics.
+
+The complete model becomes [@pinheiro2000, p. 306] :
+
+$$y_{ij} = f(\mathbf{x}_{ij}; \boldsymbol{\beta} + \mathbf{b}_j) + \epsilon_{ij}$$ {#eq-mixed-complete}
+
+with $\epsilon_{ij} \sim N(0, \sigma^2)$. The covariance matrix $\mathbf{D}$ reveals which parameters vary across groups-diagonal elements quantify between-group variability, while off-diagonal elements capture parameter correlations.
+
+### Trade-offs in Mixed-Effects Modeling
+
+The mixed-effects framework involves several critical trade-offs [@randome2013]:
+
+1.  **Complexity vs. Interpretability**: Adding random effects complicates the model but provides richer insights into variability sources
+2.  **Computation vs. Accuracy**: Exact integration is intractable; approximations balance speed against precision
+3.  **Flexibility vs. Identifiability**: Too many random effects can create identification problems
+
+## Neural Networks as Flexible Alternatives {#sec-neural-networks}
+
+When functional forms remain unknown or resist parametric specification, neural networks provide powerful nonparametric alternatives. This flexibility represents the extreme end of the interpretability-flexibility spectrum introduced in @sec-motivation: abandoning mechanistic understanding for predictive power [@breiman2001].
+
+### When Neural Networks Supersede Mechanistic Models
+
+Consider neural networks when:
+
+1.  **No Theoretical Guidance Exists**: The underlying process lacks established mathematical models
+2.  **Extreme Complexity**: Multiple interacting nonlinearities defy parametric description
+3.  **Prediction Dominates Understanding**: Forecast accuracy matters more than parameter interpretation
+4.  **Abundant Data Available**: Networks require substantial data to estimate numerous parameters
+
+The fundamental trade-off: mechanistic models embed decades of scientific understanding into few interpretable parameters, while neural networks discover patterns empirically through massive parameterization.
+
+### Universal Approximation and Its Implications
+
+The universal approximation theorem guarantees that single-hidden-layer networks can approximate any continuous function on compact sets [@hornik1989, pp-360-362; @cybenko1989]:
+
+$$f(\mathbf{x}) = \sum_{j=1}^H v_j \sigma(\mathbf{w}_j^T\mathbf{x} + b_j) + v_0$$ {#eq-neural-net}
+
+where $\sigma$ denotes the activation function, $\mathbf{w}_j \in \mathbb{R}^p$ input weights, $b_j$ biases, and $v_j$ output weights. Hidden units $H$ control approximation capacity-more units enable modeling increasingly complex patterns.
+
+This mathematical guarantee comes with crucial caveats [@hornik1989, pp-360-362]:
+
+1.  **Existence does not equal Feasibility**: The theorem guarantees existence of good approximations but not that training will find them
+2.  **No Uniqueness**: Multiple weight configurations can yield identical predictions
+3.  **No Guidance on Architecture**: The theorem does not specify how many hidden units suffice
+
+
+```{=latex}
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Practical Implementation}
+\thispagestyle{empty}
+\vspace*{\fill}
+\begin{center}
+\Huge\bfseries Practical Implementation
+\end{center}
+\vspace*{\fill}
+
+\clearpage
+```
+
+## Robust Nonlinear Regression Implementation
+
+We demonstrate robust estimation using exponential decay contaminated with outliers and leverage points, mimicking real-world data quality issues. This example illuminates the practical benefits of robust methods when data integrity cannot be guaranteed.
+
+### Data Generation with Contamination
+
+We simulate a common scenario: exponential decay measured by an automated instrument that occasionally malfunctions, producing spurious readings. Additionally, some measurements at extreme time points deviate from the model-perhaps due to experimental startup effects.
+
+```{r}
+#| label: robust-setup
+#| message: false
+#| warning: false
+# basic setup
+library(robustbase)
+library(ggplot2)
+
+set.seed(123)
+n      <- 120
+x      <- runif(n, 0, 5)
+
+# new “true” model
+beta  <- c(a = 12, b = 0.4, c = 0.8)
+y_true <- with(as.list(beta), a * exp(-b * x) + c)
+
+# larger sigma
+y <- y_true + rnorm(n, 0, 0.5)
+
+# contamination
+type <- sample(c("clean", "outlier", "leverage"), n, TRUE,
+               prob = c(0.85, 0.10, 0.05))
+
+# outliers
+out <- type == "outlier"
+y[out] <- y[out] + rnorm(sum(out), 0, 3)
+
+# leverage points
+lev <- type == "leverage"
+x[lev] <- runif(sum(lev), 5, 7)
+y[lev] <- rnorm(sum(lev), 5, 1)
+
+data_robust <- data.frame(x, y, type = factor(type))
+
+```
+```{r, echo = FALSE, label = fig-robust-setup, fig.cap="Data with outliers and leverage points"}
+ggplot(data_robust, aes(x, y, colour = type)) +
+  geom_point(size = 2, alpha = 0.7) +
+  scale_colour_manual(values = c(clean = "grey30",
+                                 outlier = "#CC6677",
+                                 leverage = "#4477AA")) +
+  theme_thesis()
+```
+
+@fig-robust-setup reveals that most points (grey) trace a smooth, monotonic drop in *y* as *x* increases, matching the expected exponential-decay signal. A handful of red points jump well above or below this curve at ordinary *x* values: typical outliers from a sensor glitch. Meanwhile, the blue leverage points sit at much larger *x* (approximately 5–7) with moderately high *y*, breaking away from the main cloud.
+
+### Comparing Estimation Methods
+
+We fit three models to compare robustness: standard NLS (vulnerable to outliers), M-estimator (moderate robustness), and MM-estimator (high breakdown with efficiency). For that reason, we use the package `robustbase` with the function `nlrob` [@maechler2025]. Parameter bounds prevent algorithms from exploring implausible regions.
+
+```{r}
+#| label: robust-comparison
+#| warning: false
+#| message: false
+
+fit_nls <- nls(y ~ a * exp(-b * x) + c,
+               data  = data_robust,
+               start = list(a = 8, b = 0.4, c = 0.5))
+
+lo <- c(a = 0,  b = 0, c = -5)
+hi <- c(a = 20, b = 2, c =  5)
+
+fit_M  <- nlrob(y ~ a * exp(-b * x) + c, data = data_robust,
+                start = list(a = 8, b = 0.4, c = 0.5),
+                lower = lo, upper = hi, method = "M")
+
+fit_MM <- nlrob(y ~ a * exp(-b * x) + c, data = data_robust,
+                start = list(a = 8, b = 0.4, c = 0.5),
+                lower = lo, upper = hi, method = "MM")
+
+# --- comparison ----------------------------------------------
+est <- rbind(True = beta,
+             NLS  = coef(fit_nls),
+             M    = coef(fit_M),
+             MM   = coef(fit_MM))
+
+print(round(est, 3))
+```
+
+Under the 15% contamination scenario, the classical nonlinear least squares fit is markedly biased: the level parameter is attenuated ($a_{hat}$ approx. 10.3 vs 12), the decay constant is inflated ($b_{hat}$ approx. 0.61 vs 0.40), and the asymptote is severely overestimated ($c_{hat}$ approx. 2.89 vs 0.80). The M-estimator reduces, but does not eliminate, these deviations, indicating partial resistance to gross errors. In contrast, the MM-estimator combining high breakdown with asymptotic efficiency returns parameter estimates within about 5% of the true values for $a$ and $b$, while cutting the NLS bias in c by roughly one half. These findings empirically confirm the theoretical robustness of MM procedures when both vertical outliers and leverage points are present.
+
+### Diagnostic Visualization
+
+Visual comparison reveals how each method responds to contamination. Standard NLS chases outliers, while robust methods effectively ignore them.
+
+```{r}
+#| label: robust-diagnostics
+#| fig-cap: "Robust methods successfully ignore outliers and leverage points"
+#| echo: false
+#| warning: false
+#| message: false
+
+x_pred  <- seq(0, 7, length.out = 200)
+pred_df <- data.frame(
+  x      = rep(x_pred, 4),
+  y      = c(beta["a"] * exp(-beta["b"] * x_pred) + beta["c"],
+             predict(fit_nls, newdata = data.frame(x = x_pred)),
+             predict(fit_M,   newdata = data.frame(x = x_pred)),
+             predict(fit_MM,  newdata = data.frame(x = x_pred))),
+  Method = factor(rep(c("True", "NLS", "M", "MM"), each = length(x_pred)),
+                  levels = c("True", "NLS", "M", "MM"))
+)
+
+ggplot(data_robust, aes(x, y)) +
+  geom_point(aes(color = type), size = 2, alpha = 0.8) +
+  geom_line(data = pred_df,
+            aes(x, y, linetype = Method), linewidth = 1) +
+  scale_color_manual(values = c(clean = "grey30",
+                                outlier = "#CC6677",
+                                leverage = "#4477AA")) +
+  scale_linetype_manual(values = c(True = "solid",
+                                   NLS  = "dashed",
+                                   M    = "dotted",
+                                   MM   = "longdash")) +
+  theme_thesis(base_size = 12) +
+  labs(x = "Time", y = "Response",
+       color = "Point Type", linetype = "Fit")
+```
+
+The solid line marked True shows the intended exponential decay, falling quickly and leveling off near y = 1.
+
+he NLS fit (short dashed line) deviates significantly, tracking well above the true curve, particularly for larger values of x. It has been pulled upward by the blue leverage points and red vertical outliers, so it predicts a higher long-run level and a steeper early decline than the data-generating process.The M estimator (dotted) lessens the bias but still runs above the truth, indicating only partial resistance to the contaminated points. The MM estimator (long dashed) almost overlaps the True line everywhere. By down-weighting both types of contamination it recovers a shape that is visually indistinguishable from the target.
+
+Overall, robustness improves in the order NLS \< M \< MM, with the MM fit providing a nearly unbiased view of the underlying process despite 15 percent contamination.
+
+### When Robustness Matters: Efficiency Analysis
+
+The efficiency-robustness trade-off becomes concrete through simulation. We compare estimator performance across contamination levels. See @sec-robust-efficiency for more details.
+
+```{r}
+#| label: fig-efficiency-sim
+#| fig-cap: "Mean-squared error for NLS and MM estimates as contamination increases"
+#| echo: false
+
+library(robustbase)
+library(ggplot2)
+
+set.seed(123)
+
+contam   <- seq(0, 0.30, 0.05)        # fraction of bad points
+n_rep    <- 100                       # Monte-Carlo repeats
+bounds_l <- c(a = 0,  b = 0, c = -5)
+bounds_u <- c(a = 20, b = 2, c =  5)
+
+mse_tbl <- data.frame()
+
+for (alpha in contam) {
+  mse_nls <- mse_mm <- numeric(n_rep)
+
+  for (i in seq_len(n_rep)) {
+    x <- runif(50, 0, 5)
+    y <- 10 * exp(-0.5 * x) + 1 + rnorm(50, 0, 0.3)
+
+    k <- floor(50 * alpha)            # number of contaminated points
+    if (k > 0) {
+      idx <- sample(50, k)
+      y[idx] <- y[idx] + rnorm(k, 0, 5)
+    }
+
+    dat <- data.frame(x, y)
+
+    ## NLS  --------------------------------------------------------------
+    nls_fit <- try(
+      nls(y ~ a * exp(-b * x) + c,
+          dat,
+          start     = list(a = 8, b = 0.4, c = 0.5),
+          algorithm = "port",
+          lower     = bounds_l,
+          upper     = bounds_u),
+      silent = TRUE)
+
+    if (!inherits(nls_fit, "try-error"))
+      mse_nls[i] <- mean((coef(nls_fit) - c(10, 0.5, 1)) ^ 2)
+    else
+      mse_nls[i] <- NA_real_
+
+    ## MM  --------------------------------------------------------------
+    mm_fit <- suppressWarnings(
+      nlrob(y ~ a * exp(-b * x) + c,
+            dat,
+            lower  = bounds_l,
+            upper  = bounds_u,
+            method = "MM"))
+
+    mse_mm[i] <- mean((coef(mm_fit) - c(10, 0.5, 1)) ^ 2)
+  }
+
+  mse_tbl <- rbind(mse_tbl,
+                   data.frame(Contam = alpha, Method = "NLS",
+                              MSE = mean(mse_nls, na.rm = TRUE)),
+                   data.frame(Contam = alpha, Method = "MM",
+                              MSE = mean(mse_mm)))
+}
+
+ggplot(mse_tbl, aes(Contam, MSE, colour = Method)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  scale_y_log10() +
+  scale_colour_manual(values = c(NLS = "grey", MM = "black")) +
+  theme_thesis() +
+  labs(x = "Contamination fraction",
+       y = "Mean squared error (log10 scale)")
+```
+
+@fig-efficiency-sim tracks mean-squared error (log10 scale) as the share of contaminated points increases.
+
+-   **NLS (grey)** deteriorates rapidly: with only 5 % contamination its error jumps by roughly two orders of magnitude and keeps climbing, flattening out near 10³ when 20–30 % of the sample is corrupted.
+
+-   **MM (black)** remains two orders of magnitude smaller for the entire range. Its error even dips slightly at very low contamination (a Monte-Carlo artefact), then rises modestly but never exceeds about 0.1.
+
+Hence, the MM estimator preserves high accuracy up to 30 % contamination, whereas NLS collapses after the first few rogue observations, graphically confirming the robustness advantage of MM.
+
+## Implementation of Nonlinear Mixed-Effects Models
+
+### Data Structure and Exploration
+
+The Orange dataset exemplifies grouped data: 35 observations arise from measuring only five trees repeatedly over time. Each observation is not independent. Measurements from the same tree share genetic factors, microenvironmental conditions, and individual growth characteristics that create correlation within trees. Standard regression assumes all 35 observations provide independent information about population parameters, but in reality, observations within a tree are more similar to each other than to observations from different trees. This violation of independence, if ignored, produces overconfident statistical inference. The `nlme` package in R addresses this through explicit modeling of the hierarchical structure.
+
+```{r}
+#| label: data-exploration
+#| message: false
+#| warning: false
+
+library(nlme)
+library(ggplot2)
+
+data(Orange)
+Orange$Tree <- factor(Orange$Tree, ordered = FALSE)
+
+cor_matrix <- cor(Orange[Orange$Tree == "1", c("age", "circumference")])
+cat("\nWithin-tree correlation (Tree 1):", cor_matrix[1,2], "\n")
+```
+
+```{r}
+#| label: data-visualization
+#| fig-cap: "Orange tree growth trajectories exhibit parallel nonlinear patterns"
+#| fig-height: 4
+#| echo: false
+
+ggplot(Orange, aes(x = age, y = circumference, group = Tree)) +
+  geom_line(aes(color = Tree), linewidth = 1) +
+  geom_point(aes(color = Tree), size = 2) +
+  scale_color_grey(start = 0.2, end = 0.7) +
+  theme_thesis(base_family = "serif", base_size = 12) +
+  labs(x = "Age (days)", y = "Circumference (mm)")
+```
+
+The within-tree correlation of 0.985 indicates near-perfect monotonic growth, confirming that repeated measures from the same tree are highly dependent. The fundamental problem emerges from the data structure: although we observe 35 data points, they represent only 5 independent experimental units (trees). The circumference range (30-214 mm) spans a seven-fold increase, while trees maintain consistent rank ordering throughout development-evidence that tree-specific factors persist across all measurements, violating the independence assumption required for standard regression.
+
+### Model Specification and Fitting
+
+The logistic growth function $f(t; \boldsymbol{\beta}) = \frac{\text{Asym}}{1 + \exp((\text{xmid} - t)/\text{scal})}$ parameterizes growth through three biologically interpretable parameters: $\text{Asym}$ (asymptotic circumference), $\text{xmid}$ (age at inflection point), and $\text{scal}$ (inverse growth rate). Using the `nlme` package, we compare pooled nonlinear least squares against a mixed-effects specification with tree-specific asymptotes using the package `nlme` [@pinheiro2025] .
+
+```{r}
+#| label: model-fitting
+
+nls_pooled <- nls(
+  circumference ~ SSlogis(age, Asym, xmid, scal),
+  data = Orange
+)
+
+nlme_fit <- nlme(
+  circumference ~ SSlogis(age, Asym, xmid, scal),
+  data = Orange,
+  fixed = Asym + xmid + scal ~ 1,
+  random = Asym ~ 1 | Tree,
+  start = c(Asym = 190, xmid = 700, scal = 350)
+)
+
+pooled_coef <- summary(nls_pooled)$coefficients
+mixed_coef <- summary(nlme_fit)$tTable
+
+cat("Pooled Model Parameters:\n")
+print(round(pooled_coef, 2))
+
+cat("\n\nMixed-Effects Model Fixed Effects:\n")
+print(round(mixed_coef, 2))
+
+random_var <- as.numeric(VarCorr(nlme_fit)["Asym", "Variance"])
+random_sd <- sqrt(random_var)
+residual_sd <- nlme_fit$sigma
+
+cat("Between-tree SD (Asym):", round(random_sd, 2), "mm\n")
+cat("Within-tree residual SD:", round(residual_sd, 2), "mm\n")
+cat("Intraclass correlation:", round(random_var/(random_var + residual_sd^2), 3), "\n")
+```
+
+The variance decomposition reveals that between-tree variation ($\sigma_b = 31.48$ mm) exceeds within-tree variation ($\sigma_w = 7.85$ mm) by a factor of four, yielding an intraclass correlation of 0.942. This extreme clustering: 94.2% of total variance attributable to tree identity-renders the effective sample size for population inference closer to 5 (number of trees) than 35 (total observations). The standard error reduction in fixed effects between models (Asym: 20.24 to 16.15; xmid: 107.30 to 35.15; scal: 81.47 to 27.15) demonstrates the efficiency gain from properly modeling correlation structure.
+
+### Model Diagnostics and Assumption Validation
+
+Residual analysis exposes the structural inadequacy of pooled modeling when applied to grouped data.
+
+```{r}
+#| label: diagnostic-plots
+#| fig-cap: "Pooled model residuals exhibit systematic clustering by tree, violating homoscedasticity assumptions"
+#| fig-height: 4
+#| echo: false
+
+par(mfrow = c(1, 2))
+
+plot(fitted(nls_pooled), residuals(nls_pooled),
+     xlab = "Fitted values", ylab = "Residuals",
+     main = "Pooled Model", pch = 19, col = "grey40")
+abline(h = 0, lty = 2, col = "black")
+
+plot(fitted(nlme_fit), residuals(nlme_fit, type = "pearson"),
+     xlab = "Fitted values", ylab = "Pearson residuals",
+     main = "Mixed-Effects Model", pch = 19, col = "grey40")
+abline(h = 0, lty = 2, col = "black")
+```
+
+The pooled model generates residual bands corresponding to individual trees: observations from trees with above-average asymptotic size cluster above zero, while smaller trees produce negative residual clusters. The mixed-effects model eliminates this structure through explicit random effects, yielding homogeneous residuals that validate model assumptions.
+
+### Uncertainty Quantification
+
+Ignoring hierarchical structure systematically underestimates prediction uncertainty because pooled models conflate within-subject and between-subject variation. In the analysis, we compute delta-method prediction-interval widths for pooled NLS vs NLME at ages 500, 1000, and 1500 (including between-tree variance for NLME), prints the widths and their ratio. See @sec-uncertainty-quant for more details.
+
+```{r}
+#| label: uncertainty-comparison
+#| echo: false
+
+test_ages <- c(500, 1000, 1500)
+results <- matrix(NA, nrow = length(test_ages), ncol = 4)
+colnames(results) <- c("Age", "Pooled_Width", "Mixed_Width", "Width_Ratio")
+
+# pooled NLS pieces
+cf        <- coef(nls_pooled)
+V_nls     <- vcov(nls_pooled)
+sig2_nls  <- deviance(nls_pooled) / df.residual(nls_pooled)
+df_nls    <- df.residual(nls_pooled)
+
+# NLME pieces (new tree prediction)
+beta       <- fixef(nlme_fit)
+Vb         <- vcov(nlme_fit)
+tau2       <- as.numeric(VarCorr(nlme_fit)["Asym", "Variance"])  # var(b_Asym)
+sig2_nlme  <- nlme_fit$sigma^2
+
+# logistic mean and gradient
+f <- function(t, Asym, xmid, scal) Asym / (1 + exp((xmid - t)/scal))
+grad <- function(t, Asym, xmid, scal) {
+  z <- (xmid - t)/scal
+  g <- 1 / (1 + exp(z))
+  c(
+    g,                              # d/dAsym
+    -(Asym/scal) * g * (1 - g),    # d/dxmid
+    (Asym * z / scal) * g * (1 - g) # d/dscal
+  )
+}
+
+for (i in seq_along(test_ages)) {
+  t <- test_ages[i]
+
+  # Pooled NLS PI (delta + residual)
+  g_nls <- grad(t, cf["Asym"], cf["xmid"], cf["scal"])
+  se_pred_nls <- sqrt(as.numeric(t(g_nls) %*% V_nls %*% g_nls) + sig2_nls)
+  w_nls <- 2 * qt(0.975, df_nls) * se_pred_nls
+
+  # NLME PI for a NEW tree (fixed-eff var + random-eff var on Asym + residual)
+  g_mx  <- grad(t, beta["Asym"], beta["xmid"], beta["scal"])
+  var_mean <- as.numeric(t(g_mx) %*% Vb %*% g_mx)
+  var_re   <- (g_mx[1]^2) * tau2
+  se_pred_nlme <- sqrt(var_mean + var_re + sig2_nlme)
+  w_nlme <- 2 * qnorm(0.975) * se_pred_nlme
+
+  results[i, ] <- c(t, w_nls, w_nlme, w_nlme / w_nls)
+}
+
+print(round(results, 2))
+
+```
+
+The mixed-effects model yields prediction intervals 39% wider than pooled estimates (127.19 mm versus 91.62 mm), quantifying the cost of ignoring hierarchical structure. The pooled interval width of 91.62 mm assumes all variation stems from measurement error, treating each observation as independent information.
+
+## Neural Network Implementation
+
+Neural networks represent the extreme endpoint of the flexibility-interpretability trade-off. Where mechanistic models encode domain knowledge through parameter constraints, neural networks achieve universality through massive parameterization. We demonstrate this fundamental tension using the already knwon Michaelis-Menten kinetics.
+
+### Data Generation and Preparation
+
+For this example, we reconsider the Michaelis-Menten model, see @eq-michaelis-menten in @sec-michaelis-menten. We generate simulated data:
+
+```{r}
+#| label: nn-setup
+#| message: false
+#| warning: false
+library(nnet)
+library(neuralnet)
+library(ggplot2)
+
+set.seed(456)
+n <- 100
+substrate <- seq(0, 10, length.out = n)
+
+Vmax_true <- 100
+Km_true <- 2.5
+true_rate <- Vmax_true * substrate / (Km_true + substrate)
+observed_rate <- true_rate + rnorm(n, 0, 5)
+
+df <- data.frame(substrate = substrate, rate = observed_rate)
+
+normalize <- function(x) (x - mean(x)) / sd(x)
+denormalize <- function(x, original) x * sd(original) + mean(original)
+
+df_norm <- data.frame(
+  substrate = normalize(df$substrate),
+  rate = normalize(df$rate)
+)
+```
+
+Neural networks require normalized inputs because gradient-based optimization becomes unstable when features have different scales-the gradient magnitude depends on input scale, causing convergence problems when scales differ by orders of magnitude.
+
+### Comparing Network Architectures
+
+We compare three models: the true mechanistic form and two neural architectures. The comparison requires two packages: `nnet` for single hidden layer networks and `neuralnet` for deeper architectures, as `nnet` restricts networks to one hidden layer [@fritsch2019; @ripley2025]. This comparison quantifies the price of flexibility, answering as to many parameters must we add to match the performance of a 2-parameter mechanistic model that encodes the correct functional form.
+
+```{r}
+#| label: nn-fitting
+#| warning: false
+#| message: false
+
+set.seed(123)
+nn_single <- nnet(rate ~ substrate, data = df_norm, 
+                  size = 5, linout = TRUE, maxit = 500, trace = FALSE)
+
+suppressMessages({
+  nn_multi <- neuralnet(rate ~ substrate, data = df_norm, 
+                        hidden = c(5, 3), linear.output = TRUE)
+})
+
+pred_single <- denormalize(predict(nn_single, df_norm), df$rate)
+pred_multi  <- denormalize(compute(nn_multi, df_norm$substrate)$net.result, df$rate)
+
+mm_fit <- nls(rate ~ Vmax * substrate / (Km + substrate),
+              data = df,
+              start = list(Vmax = 80, Km = 3))
+
+rmse <- function(y, yhat) sqrt(mean((y - yhat)^2))
+
+fit_stats <- data.frame(
+  Model = c("Michaelis-Menten", "NN (1 layer)", "NN (2 layers)"),
+  Parameters = c(
+    2,
+    length(nn_single$wts),
+    sum(unlist(lapply(nn_multi$weights[[1]], function(layer_list) sapply(layer_list, length))))
+  ),
+  RMSE = c(rmse(df$rate, predict(mm_fit)),
+           rmse(df$rate, pred_single),
+           rmse(df$rate, pred_multi))
+)
+
+print(fit_stats)
+
+```
+
+The results expose the inefficiency of model-free approaches. The single-layer neural network requires 16 parameters to achieve a 4.3% RMSE reduction (from 4.97 to 4.75) compared to the 2-parameter mechanistic model-an eight-fold parameter increase for marginal gain. This reveals two fundamental limitations.
+
+First, interpretability vanishes. The mechanistic model's parameters are measurable biochemical quantities. We can validate $V_{max}$ through independent velocity measurements and compare $K_m$ across enzyme variants to test structure-function hypotheses. The neural network's 16 weights exist purely as mathematical constructs without physical meaning.
+
+Second, the performance gain is illusory. With measurement noise $\sigma = 5$, the 0.22 RMSE difference falls well within noise variation. The neural network's flexibility allows it to fit noise patterns that the mechanistic model correctly ignores. This can be seens as a form of overfitting that manifests as marginal RMSE improvement without capturing additional signal.
+
+### Visualization: Flexibility Versus Interpretability
+
+```{r}
+#| label: nn-visualization
+#| fig-cap: "Neural networks versus Nonlinear model"
+#| echo: false
+#| warning: false
+#| message: false
+
+plot_data <- data.frame(
+  substrate = rep(df$substrate, 5),
+  rate = c(df$rate, true_rate, predict(mm_fit), pred_single, pred_multi),
+  type = factor(rep(c("Observed", "True", "Michaelis-Menten", 
+                      "NN (1 layer)", "NN (2 layers)"), 
+                    each = n))
+)
+
+ggplot(subset(plot_data, type == "Observed"), 
+       aes(x = substrate, y = rate)) +
+  geom_point(color = "grey40", alpha = 0.5, size = 1.5) +
+  geom_line(data = subset(plot_data, type != "Observed"),
+            aes(color = type, linetype = type), 
+            linewidth = 0.8) +
+  scale_color_manual(values = c("True" = "black", 
+                               "Michaelis-Menten" = "grey20",
+                               "NN (1 layer)" = "grey50", 
+                               "NN (2 layers)" = "grey70")) +
+  scale_linetype_manual(values = c("True" = "solid", 
+                                   "Michaelis-Menten" = "dashed",
+                                   "NN (1 layer)" = "dotted", 
+                                   "NN (2 layers)" = "dotdash")) +
+  theme_thesis(base_family = "serif", base_size = 12) +
+  labs(x = "Substrate Concentration", 
+       y = "Reaction Rate", 
+       color = "Model", 
+       linetype = "Model") +
+  theme(legend.position = c(0.7, 0.3),
+        legend.background = element_rect(fill = "white", color = NA))
+```
+
+The visual comparison confirms that all models capture the saturation curve adequately. The neural networks' lower RMSE might stem from flexibility in the transition region-they can adjust the curvature locally while the mechanistic model maintains a fixed hyperbolic shape. This local flexibility explains both the predictive advantage and the interpretive disadvantage: the networks achieve better fit by abandoning the constraint that the curve represents enzyme kinetics.
+
+### When Each Approach Dominates
+
+Mechanistic models dominate when parameter estimates guide experimental design—for example, knowing $K_m$ determines substrate concentrations for subsequent experiments; when theory testing requires parameter comparison, such as comparing $V_{max}$ across mutant enzymes to test hypotheses about active sites; when sample sizes are limited, because mechanistic models can deliver reasonable estimates with fewer data points; and when results must be communicated to domain experts, since biochemists readily interpret $K_m$ whereas neural-network weights are opaque.
+
+Neural networks dominate when prediction accuracy is the primary objective; when no mechanistic theory exists, as in complex biological systems with unknown governing equations; when abundant data removes sample-size constraints (e.g., millions of observations from automated experiments); when the system exhibits high-dimensional interactions, such as gene-expression data with thousands of interacting factors; and when the model will be embedded as one component of a larger system (e.g., recommendation engines) where interpretability is secondary or irrelevant.

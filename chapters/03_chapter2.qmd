@@ -1,0 +1,1425 @@
+---
+title: "Parameter Estimation"
+---
+
+```{r, echo=FALSE}
+source("setup.R")
+```
+
+Parameter estimation lies at the heart of nonlinear regression analysis. It defines how variables relate by identifying optimal parameter values. In the theoretical part of this chapter, we explore methods commonly used for estimating parameters in nonlinear models, beginning with nonlinear least squares, the most common approach. We then examine maximum likelihood estimation as an alternative statistical perspective before exploring numerical optimization algorithms essential for solving these estimation problems. The practical part will demonstrate model fitting step-by-step, highlighting self-starting values and comparative analysis of optimization as well as self-starting algorithms.
+
+```{=latex}
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Theory}
+\thispagestyle{empty}
+
+\vspace*{\fill}
+\begin{center}
+  \Huge\bfseries Theory
+\end{center}
+\vspace*{\fill}
+
+\clearpage
+```
+
+## Nonlinear Least Squares Estimation {#sec-nonlinear-least-square}
+
+Least squares estimation constitutes the predominant approach for parameter estimation in nonlinear regression analysis [@seber_wild_2003; @bates_watts_1988]. This section develops the mathematical framework for nonlinear least squares and explores its theoretical properties.
+
+### Formulation of the least squares problem
+
+Consider a dataset consisting of $n$ observations $\{(x_i, y_i)\}_{i=1}^n$, where $y_i \in \mathbb{R}$ represents the response variable and $x_i \in \mathbb{R}^m$ represents the vector of predictor variables in a $m$-dimensional space. Our objective is to model the relationship between these variables using a nonlinear function.
+
+#### Model specification
+
+The regularity conditions established in @sec-regularity-conditions - particularly the continuity and differentiability of $f$, the bounded parameter space, and the identifiability requirement-ensure that our minimization problem is well-posed and that the nonlinear least squares estimator exists with desirable statistical properties [@seber_wild_2003, p. 571].
+
+We posit that these observations follow a nonlinear model of the form introduced in the previous chapter in @eq-formal-nonlinear:
+
+$$Y_i = f(x_i; \boldsymbol{\beta}) + \varepsilon_i, \quad i = 1, 2, \ldots, n
+\tag{\ref{eq-formal-nonlinear}}$$
+
+For consistency with the main references used in the thesis [@seber_wild_2003; @bates_watts_1988], the mean function is written as $f(x_i;\boldsymbol{\beta})$. This notation is equivalent to $m(\cdot;\boldsymbol{\beta})$ used in the previous chapter. Both $m$ and $f$ denote the same model function.
+
+#### Objective function
+
+The nonlinear least squares (NLS) estimator seeks to determine the parameter vector $\boldsymbol{\beta}$ that minimizes the Residual Sum of Squares (RSS) [@seber_wild_2003, p. 21; @bates_watts_1988, p. 36]:
+
+$$\text{RSS}(\boldsymbol{\beta}) = \sum_{i=1}^{n} [y_i - f(x_i; \boldsymbol{\beta})]^2 = \sum_{i=1}^{n} r_i^2(\boldsymbol{\beta})$$ {#eq-rss-component}
+
+where $r_i(\boldsymbol{\beta}) = y_i - f(x_i; \boldsymbol{\beta})$ is the residual for the $i$-th observation.
+
+The minimization problem can be formally stated as:
+
+$$\hat{\boldsymbol{\beta}}_{NLS} = \arg\min_{\boldsymbol{\beta} \in \beta} \text{RSS}(\boldsymbol{\beta})$$ {#eq-nls-minimization}
+
+#### Optimality conditions
+
+To find this minimum, we apply the necessary condition for optimality by setting the gradient of the RSS with respect to $\boldsymbol{\beta}$ equal to zero. The detailed derivation of this gradient is provided in @sec-appendix-gradient-derivation.
+
+#### The Jacobian Matrix {#sec-jacobian-matrix}
+
+The Jacobian matrix $\mathbf{J}(\boldsymbol{\beta})$ of the function $\mathbf{f}$ with respect to $\boldsymbol{\beta}$ is an $n \times p$ matrix containing all first-order partial derivatives: $$
+J_{ij}(\boldsymbol{\beta}) = \frac{\partial f(x_i; \boldsymbol{\beta})}{\partial \beta_j}, 
+\quad i = 1,2,\ldots,n, \quad j = 1,2,\ldots,p. 
+$$ {#eq-jacobian}
+
+In essence, the Jacobian matrix organizes all partial derivatives into a structured form. Each row corresponds to an observation, and each column corresponds to a parameter. This matrix quantifies how sensitive the model predictions are to changes in each parameter.
+
+#### The Hessian Matrix {#sec-hessian-matrix}
+
+Analogously, the Hessian matrix collects second-order partial derivatives of the model with respect to the parameters. Compared to the Jacobian, the Hessian has all the second-order derivatives.
+
+For each observation $i$, define the $p \times p$ Hessian of $f$ by $$
+[\mathbf{H}_i(\boldsymbol{\beta})]_{jk} 
+= \frac{\partial^2 f(x_i; \boldsymbol{\beta})}{\partial \beta_j \, \partial \beta_k},
+\quad j,k = 1,2,\ldots,p.
+$$ {#eq-hessian-f}
+
+Equivalently, for the residual $r_i(\boldsymbol{\beta}) = y_i - f(x_i; \boldsymbol{\beta})$, $$
+[\nabla^2 r_i(\boldsymbol{\beta})]_{jk}
+= \frac{\partial^2 r_i(\boldsymbol{\beta})}{\partial \beta_j \, \partial \beta_k}
+= - \frac{\partial^2 f(x_i; \boldsymbol{\beta})}{\partial \beta_j \, \partial \beta_k}
+= -[\mathbf{H}_i(\boldsymbol{\beta})]_{jk}.
+$$ {#eq-hessian-residual}
+
+The full second-derivative structure thus consists of $n$ such $p \times p$ matrices, one per observation. Computing all elements can be intensive, requiring $n \times p \times p$ second derivatives [@seber_wild_2003, p. 621]. A complete derivation for the objective appears in @sec-appendix-hessian-derivation.
+
+Using the notation established with the Jacobian and the Hessian, the gradient of the RSS can be expressed in matrix form as: $$
+\nabla_{\boldsymbol{\beta}} \text{RSS}(\boldsymbol{\beta}) 
+= -2\,\mathbf{J}(\boldsymbol{\beta})^\top \mathbf{r}(\boldsymbol{\beta}).
+$$ {#eq-gradient-rss}
+
+Setting this gradient to zero yields the normal equations for nonlinear least squares [@seber_wild_2003, p. 22]: $$
+\mathbf{J}(\boldsymbol{\beta})^\top \mathbf{r}(\boldsymbol{\beta}) = \mathbf{0}.
+$$ {#eq-normal-equations}
+
+These normal equations form a system of $p$ nonlinear equations with $p$ unknown parameters. Unlike linear regression, where the normal equations yield a closed-form solution, these equations generally cannot be solved analytically due to the nonlinearity of $f(x_i; \boldsymbol{\beta})$ with respect to the parameters. A detailed example demonstrating this analytical intractability using the Michaelis–Menten model is provided in @sec-appendix-mm-example.
+
+### Linearization Approach
+
+The normal equations $\mathbf{J}(\boldsymbol{\beta})^\top \mathbf{r}(\boldsymbol{\beta}) = \mathbf{0}$ derived above are nonlinear in $\boldsymbol{\beta}$ and, in general, have no closed-form solution. Rather than attempting to solve this nonlinear system directly, we proceed iteratively: at a current estimate $\boldsymbol{\beta}^{(k)}$, we take a local Taylor expansion (linearizing the mean function $f$ or, equivalently, the residuals) using the Jacobian and Hessian Matrix, which turns the problem into a linear least-squares subproblem for a small parameter change $\Delta\boldsymbol{\beta}$ [@seber_wild_2003, p. 25]. Solving this subproblem yields a step intended to reduce the RSS. Repeating these local approximations generates a sequence that (under suitable conditions) converges to a stationary point of the objective. A detailed derivation of the Taylor linearization used here is given in @sec-taylor-series-expansion.
+
+#### Iterative Procedure
+
+Concretely, starting from an initial guess $\boldsymbol{\beta}^{(0)}$, we linearize the model around $\boldsymbol{\beta}^{(k)}$ and solve the resulting linear least-squares system to obtain a parameter update $\Delta\boldsymbol{\beta}$. This update represents the best small adjustment to decrease the RSS. We then set:
+
+$$
+\boldsymbol{\beta}^{(k+1)} = \boldsymbol{\beta}^{(k)} + \Delta\boldsymbol{\beta}.
+$$ {#eq-parameter-update}
+
+This process repeats until standard convergence criteria are met (see `nls.control` in @sec-algorithms-real-data based on @bates2025), for example:
+
+-   the parameter change $\|\Delta\boldsymbol{\beta}\|$ is sufficiently small;
+-   the reduction in the RSS between iterations is negligible;
+-   the gradient of the objective is close to zero;
+-   a maximum number of iterations is reached.
+
+Algorithmic details of how $\Delta\boldsymbol{\beta}$ is computed, e.g., Gauss–Newton or Levenberg–Marquardt are discussed in @sec-algorithms.
+
+#### Importance of Starting Values {#sec-remark-importance}
+
+Nonlinear least squares is local: algorithms, elaborated below, converge to a nearby stationary point determined by the starting values and the local curvature of the RSS surface. In nonconvex landscapes with multiple minima or flat valleys, poor starts can yield slow convergence, non-convergence, or convergence to suboptimal solutions [@ritz_streibig_2008, p. 8; @bates_watts_1988, p. 90; @seber_wild_2003, pp 92-93]. See @sec-false-minimum for further details.
+
+```{r}
+#| label: fig-rss-landscape
+#| echo: false
+#| message: false
+#| warning: false
+#| fig-cap: "Nonconvex RSS and sensitivity to starting values."
+
+library(ggplot2)
+library(grid)
+
+# A toy 1-parameter objective with multiple local minima
+rss <- function(b) (b^2 - 1)^2 + 0.4 * sin(5 * b + 0.5) + 2.5
+gr  <- function(b) 4 * b * (b^2 - 1) + 2 * cos(5 * b + 0.5)
+
+grid_b <- seq(-3, 3, length.out = 1600)
+df_fun <- data.frame(beta = grid_b, rss = rss(grid_b))
+
+# Simple gradient-descent paths from two starts
+gd_path <- function(b0, alpha = 0.02, steps = 120) {
+  b <- numeric(steps); b[1] <- b0
+  for (k in 2:steps) b[k] <- b[k - 1] - alpha * gr(b[k - 1])
+  data.frame(step = seq_len(steps), beta = b, rss = rss(b))
+}
+
+startA <- -2.2
+startB <-  2.2
+pathA  <- gd_path(startA)
+pathB  <- gd_path(startB)
+endA   <- tail(pathA, 1)
+endB   <- tail(pathB, 1)
+
+# Global minimum (approx) on a fine grid
+g_idx <- which.min(df_fun$rss)
+g_pt  <- df_fun[g_idx, , drop = FALSE]
+
+# Helper to label endpoints relative to global minimum
+lab_point <- function(pt, g) {
+  if (abs(pt$beta - g$beta) < 0.03 && abs(pt$rss - g$rss) < 1e-3) "Global minimum" else "Local minimum"
+}
+labA <- lab_point(endA, g_pt)
+labB <- lab_point(endB, g_pt)
+
+# label positions moved "inside" the curve
+xA_lab <- startA + 0.6
+yA_lab <- rss(startA) - 3.5
+
+xB_lab <- startB - 0.6
+yB_lab <- rss(startB) - 3.5
+
+p <- ggplot(df_fun, aes(beta, rss)) +
+  geom_line(linewidth = 0.9) +
+  geom_path(data = pathA, aes(beta, rss),
+            arrow = arrow(length = unit(0.12, "cm")), linewidth = 0.7) +
+  geom_path(data = pathB, aes(beta, rss),
+            arrow = arrow(length = unit(0.12, "cm")), linewidth = 0.7) +
+  geom_point(aes(x = startA, y = rss(startA)), size = 2) +
+  geom_point(aes(x = startB, y = rss(startB)), size = 2) +
+  # moved labels
+  annotate("text", x = xA_lab, y = yA_lab, label = "Start A") +
+  annotate("text", x = xB_lab, y = yB_lab, label = "Start B") +
+  geom_point(data = endA, aes(beta, rss), size = 2) +
+  geom_point(data = endB, aes(beta, rss), size = 2) +
+  geom_point(data = g_pt, aes(beta, rss), shape = 21, stroke = 1, size = 2.6, fill = NA) +
+  annotate("text", x = endA$beta, y = endA$rss - 0.35, label = labA, vjust = 1.1) +
+  annotate("text", x = endB$beta, y = endB$rss - 0.35, label = labB, vjust = 1.1) +
+  labs(x = expression(paste("Parameter (", beta, ")")),
+       y = expression(paste("RSS(", beta, ")"))) +
+  theme_thesis()
+
+p
+```
+
+As @fig-rss-landscape illustrates, the nonconvex RSS surface means that an optimizer initiated at a suboptimal point (Start A) may converge to a local, rather than the global, minimum.
+
+```{=latex}
+\FloatBarrier
+```
+
+## Numerical Optimization Algorithms {#sec-algorithms}
+
+In the preceding formulation, we expressed the nonlinear least squares problem as minimizing the sum of squared residuals $\text{RSS}(\boldsymbol{\beta}) = \sum_{i=1}^{n} r_i^2(\boldsymbol{\beta})$. In optimization literature, it is common to include a factor of $1/2$ in the objective function:
+
+$$
+\min_{\boldsymbol{\beta}} \frac{1}{2} \sum_{i=1}^{n} \bigl(r_i(\boldsymbol{\beta})\bigr)^2
+$$ {#eq-objective-half}
+
+This formulation is mathematically equivalent as it does not change the location of the minimum. The $1/2$ factor simplifies the derivation of gradients by canceling the factor of 2 that arises from differentiating the squared terms, which is particularly convenient when working with optimization algorithms. We adopt this convention in the following sections.
+
+The various algorithms for solving nonlinear least squares problems differ primarily in how they solve for the parameter update $\Delta\boldsymbol{\beta}$ at each iteration. Each approach offers distinct advantages and limitations regarding convergence properties, computational efficiency, and robustness. Figure \ref{fig:nonlinear-least-squares} illustrates the hierarchy of these methods and their relationships. Below, we examine the Gauss-Newton as well as the Levenberg-Marquardt algorithms in detail. Newton, Port and P-Linear are found in @sec-newton-method, @sec-port-algorithm and @sec-p-linear respectively.
+
+```{=latex}
+\begin{figure}
+\centering
+\begin{tikzpicture}[
+  scale=0.65, transform shape,
+  every node/.style={transform shape},
+  mainbox/.style={rectangle, draw, thin, fill=gray!15, text width=10cm, minimum height=0.8cm, align=center, font=\normalsize},
+  methodbox/.style={rectangle, draw, thin, fill=gray!15, text width=4.9cm, minimum height=0.9cm, align=center, font=\normalsize},
+  methodname/.style={rectangle, draw, thin, fill=gray!30, text width=4.9cm, minimum height=0.8cm, align=center, font=\normalsize}
+]
+
+% Consistent spacing parameter
+\def\vspace{1.7 cm}
+\def\hspace{6 cm} % Increased horizontal spacing between columns
+
+% Main boxes with equal width
+\node[mainbox] (title) at (0,0) {Nonlinear Least Squares\\
+min $\sum_{i=1}^{n}(r_i(\boldsymbol{\beta}))^2$};
+
+\node[mainbox] (residuals) at (0,-\vspace) {Compute Residuals \& Jacobian\\
+$r(\boldsymbol{\beta}) = \mathbf{y} - f(\mathbf{x},\boldsymbol{\beta})$};
+
+\node[mainbox] (linearize) at (0,-2*\vspace) {Linearize Residuals\\
+$r(\boldsymbol{\beta} + \Delta\boldsymbol{\beta}) \approx r(\boldsymbol{\beta}) - J(\boldsymbol{\beta})\Delta\boldsymbol{\beta}$};
+
+\node[mainbox] (normal) at (0,-3*\vspace) {Form Normal Equations\\
+min $\|r(\boldsymbol{\beta}) - J(\boldsymbol{\beta})\Delta\boldsymbol{\beta}\|^2 \Rightarrow J^T J\Delta\boldsymbol{\beta} = -J^T r$};
+
+% Three methods in columns - with wider spacing
+\node[methodbox] (newton) at (-\hspace,-4*\vspace) {Use Full Hessian and Gradient\\
+$\Delta\boldsymbol{\beta} = -H^{-1}g$};
+
+\node[methodbox] (gauss) at (0,-4*\vspace) {Approximate Hessian\\
+$\Delta\boldsymbol{\beta} = -(J^TJ)^{-1}J^Tr$};
+
+\node[methodbox] (plinear) at (\hspace,-4*\vspace) {Partially Linear Approach\\
+$f(\mathbf{x}, \boldsymbol{\beta}_L, \boldsymbol{\phi})$};
+
+% Method names
+\node[methodname] (newtonname) at (-\hspace,-5*\vspace) {Newton};
+
+\node[methodname] (gaussname) at (0,-5*\vspace) {Gauss-Newton};
+
+\node[methodbox] (solvelin) at (\hspace,-5*\vspace) {Solve linear part $\boldsymbol{\beta}_L$ analytically};
+
+% Middle branch continuation
+\node[methodbox] (damping) at (0,-6*\vspace) {Add damping parameter $\lambda$\\
+$\Delta\boldsymbol{\beta} = -(J^TJ + \lambda I)^{-1}J^Tr$};
+
+% Right branch continuation
+\node[methodbox] (iterate) at (\hspace,-6*\vspace) {Iterate on nonlinear part $\boldsymbol{\phi}$};
+
+% Method names level 2
+\node[methodname] (lm) at (0,-7*\vspace) {Levenberg-Marquardt};
+
+\node[methodname] (pl) at (\hspace,-7*\vspace) {$P$-Linear};
+
+% Final parts
+\node[methodbox] (constraint) at (0,-8*\vspace) {Add Constraints: $c(\boldsymbol{\beta}) \geq 0$};
+
+\node[methodname] (port) at (0,-9*\vspace) {Port};
+
+% Connections - vertical lines with precise positioning
+\draw[thin] (title.south) -- (residuals.north);
+\draw[thin] (residuals.south) -- (linearize.north);
+\draw[thin] (linearize.south) -- (normal.north);
+
+% Branch connections after normal equations
+\coordinate (split) at (0,-3.5*\vspace);
+\draw[thin] (normal.south) -- (split);
+\draw[thin] (split) -- (newton.north);
+\draw[thin] (split) -- (gauss.north);
+\draw[thin] (split) -- (plinear.north);
+
+% Continue down each branch
+\draw[thin] (newton.south) -- (newtonname.north);
+\draw[thin] (gauss.south) -- (gaussname.north);
+\draw[thin] (plinear.south) -- (solvelin.north);
+
+% Connect middle branch
+\draw[thin] (gaussname.south) -- (damping.north);
+\draw[thin] (damping.south) -- (lm.north);
+\draw[thin] (lm.south) -- (constraint.north);
+\draw[thin] (constraint.south) -- (port.north);
+
+% Connect right branch
+\draw[thin] (solvelin.south) -- (iterate.north);
+\draw[thin] (iterate.south) -- (pl.north);
+
+\end{tikzpicture}
+\caption{Nonlinear Least Squares Optimization Methods}
+\label{fig:nonlinear-least-squares}
+\end{figure}
+```
+
+```{=latex}
+\FloatBarrier
+```
+
+### Gauss-Newton Method
+
+#### Theoretical Foundation
+
+The Gauss-Newton method follows the linearization approach discussed earlier but makes a key approximation to the Hessian matrix [@seber_wild_2003, pp. 25-27, 619-623; @bates_watts_1988, pp. 40-52, 80]. It is the most prominent algorithm used in nonlinear regression [@obrien_silcox_2024, p. 8; @weisberg2014, p. 255]. Recall from @eq-hessian-objective that the Hessian matrix for the least squares objective function has the form:
+
+$$\mathbf{H}(\boldsymbol{\beta}) = \mathbf{J}(\boldsymbol{\beta})^T\mathbf{J}(\boldsymbol{\beta}) + \sum_{i=1}^{n}r_i(\boldsymbol{\beta})\mathbf{H}_i(\boldsymbol{\beta})
+\tag{\ref{eq-hessian-objective}}$$
+
+The fundamental insight of the Gauss-Newton method is to approximate the Hessian by dropping the second term:
+
+$$\mathbf{H}(\boldsymbol{\beta}) \approx \mathbf{J}(\boldsymbol{\beta})^T\mathbf{J}(\boldsymbol{\beta})$$ {#eq-gauss-newton-approx}
+
+This approximation is justified when either [@seber_wild_2003, p. 26]:
+
+1.  The residuals $r_i(\boldsymbol{\beta})$ are small near the solution (i.e., the model fits the data well)
+2.  The model is nearly linear in its parameters (making second derivatives small)
+
+With this approximation, the Gauss-Newton update becomes:
+
+$$\Delta\boldsymbol{\beta} = [\mathbf{J}(\boldsymbol{\beta})^\top\mathbf{J}(\boldsymbol{\beta})]^{-1}\mathbf{J}(\boldsymbol{\beta})^\top\mathbf{r}(\boldsymbol{\beta})
+$$ {#eq-gauss-newton-update}
+
+This update formula provides several computational advantages [@seber_wild_2003, p. 36; @bates_watts_1988, p. 80]:
+
+1.  It requires only first derivatives (the Jacobian matrix), avoiding the need to compute second derivatives
+2.  The approximated Hessian $\mathbf{J}(\boldsymbol{\beta})^\top\mathbf{J}(\boldsymbol{\beta})$ is positive semidefinite; if $\mathbf{J}(\boldsymbol{\beta})$ has full column rank, it is positive definite, which promotes stable convergence.
+3.  Each iteration requires solving only a linear system of equations rather than computing a full Hessian matrix
+
+#### Advantages and Limitations
+
+**Advantages:**
+
+1.  **Computational efficiency**: By avoiding the calculation of second derivatives, Gauss-Newton requires significantly less computational effort, especially for complex models with many parameters.
+
+2.  **Numerical stability**: The Gauss-Newton approximate Hessian $\mathbf{J}(\boldsymbol{\beta})^\top \mathbf{J}(\boldsymbol{\beta})$ is positive semidefinite; if $\mathbf{J}(\boldsymbol{\beta})$ has full column rank, it is positive definite.
+
+3.  **Simpler implementation**: The algorithm requires only the computation of the model function and its first derivatives.
+
+**Limitations [@nocedal2006, p. 258]:**
+
+1.  **Slower convergence for ill-conditioned problems**: When the approximated Hessian is nearly singular (i.e., when the columns of the Jacobian are nearly linearly dependent), the convergence can be slow .
+
+2.  **Potential instability for large residuals**: When the residuals are large or the model is highly nonlinear, the Hessian approximation becomes less accurate, potentially leading to poor convergence.
+
+3.  **Singularity issues**: If the Jacobian matrix does not have full column rank, the approximated Hessian becomes singular, making the standard update formula uncomputable.
+
+### Levenberg-Marquardt Method
+
+#### Theoretical Foundation
+
+The Levenberg-Marquardt (LM) algorithm addresses the limitations of the Gauss-Newton method by introducing a damping parameter $\lambda$ that modifies the normal equations [@seber_wild_2003, pp. 624-627; @bates_watts_1988, pp. 80-81]:
+
+$$(\mathbf{J}(\boldsymbol{\beta})^T\mathbf{J}(\boldsymbol{\beta}) + \lambda \mathbf{D})\Delta\boldsymbol{\beta} = \mathbf{J}(\boldsymbol{\beta})^T\mathbf{r}(\boldsymbol{\beta})$$ {#eq-lm-update}
+
+where $\mathbf{D}$ is usually either the identity matrix $\mathbf{I}$ (in Levenberg's original formulation) or a diagonal matrix containing the diagonal elements of $\mathbf{J}(\boldsymbol{\beta})^T\mathbf{J}(\boldsymbol{\beta})$ (in Marquardt's refinement).
+
+The damping parameter $\lambda$ serves as a continuous regularization term that creates a smooth transition between two optimization strategies:
+
+1.  When $\lambda$ is small (approaching zero), the algorithm behaves like the Gauss-Newton method, which is efficient near the solution.
+
+2.  When $\lambda$ is large, the algorithm approximates gradient descent (steepest descent), which is more robust when far from the solution:
+
+$$\Delta\boldsymbol{\beta} \approx \frac{1}{\lambda}\,\mathbf{J}(\boldsymbol{\beta})^\top\mathbf{r}(\boldsymbol{\beta})
+\;\propto\;
+-\nabla_{\boldsymbol{\beta}}\!\bigl(\tfrac12\|r(\boldsymbol{\beta})\|^2\bigr),
+$$
+
+This adaptive behavior gives the LM algorithm its characteristic robustness and efficiency. The algorithm can also be interpreted through the lens of trust region methods, where the damping parameter $\lambda$ implicitly defines a trust region radius within which we believe our quadratic approximation of the objective function is accurate.
+
+The specific adaptive strategy for updating the damping parameter $\lambda$ is detailed in @sec-appendix-lm-damping.
+
+Marquardt's modification replaces the identity matrix $\mathbf{I}$ with a diagonal matrix containing the diagonal elements of $\mathbf{J}^T\mathbf{J}$:
+
+$$(\mathbf{J}^T\mathbf{J} + \lambda \cdot \text{diag}(\mathbf{J}^T\mathbf{J}))\Delta\boldsymbol{\beta} = \mathbf{J}^T\mathbf{r}$$
+
+This modification addresses parameter scale sensitivity, ensuring each parameter is regularized in proportion to its scale and sensitivity.
+
+#### Advantages and Limitations
+
+**Advantages:**
+
+1.  **Robustness**: The algorithm reliably converges from poor initial parameter estimates where pure Gauss-Newton might diverge.
+
+2.  **Self-regulating step size**: The adaptive damping automatically adjusts between large steps when far from the minimum and refined steps when approaching convergence.
+
+3.  **Parameter scale insensitivity**: Especially with Marquardt's modification, the algorithm handles parameters of different scales appropriately.
+
+4.  **Computational efficiency**: While more complex than Gauss-Newton, it remains computationally tractable for most problems, requiring only first derivatives.
+
+**Limitations:**
+
+1.  **Computational cost**: Each iteration might require multiple function evaluations to adjust $\lambda$ appropriately.
+
+2.  **Local minimum convergence**: Like all gradient-based methods, it can converge to local rather than global minima.
+
+3.  **Derivative requirement**: The algorithm requires accurate computation of the Jacobian matrix, which may be difficult to obtain analytically for some complex models.
+
+4.  **Memory requirements**: For problems with many observations and parameters, storing the full Jacobian matrix can be memory-intensive.
+
+## Maximum Likelihood Estimation
+
+Maximum Likelihood Estimation (MLE) provides a general framework for parameter estimation that also applies to nonlinear least squares [@obrien_silcox_2024, pp. 7, 29]. While our previous discussion focused on algorithms for minimizing the sum of squared residuals, MLE offers a broader statistical perspective based on probability theory.
+
+### Statistical Foundation
+
+MLE seeks the parameter vector $\boldsymbol{\beta}$ that maximizes the probability of observing the given data under a specified model. Given observations $\{(x_i,y_i)\}_{i=1}^n$ and conditional densities or mass functions $f(y_i\mid x_i,\boldsymbol{\beta})$, we define the likelihood and log-likelihood:
+
+$$
+L(\boldsymbol{\beta})
+=
+\prod_{i=1}^n
+f\bigl(y_i\mid x_i,\boldsymbol{\beta}\bigr),
+\quad
+\ell(\boldsymbol{\beta})
+=
+\sum_{i=1}^n
+\log f\bigl(y_i\mid x_i,\boldsymbol{\beta}\bigr).
+$$ {#eq-likelihood}
+
+The **maximum likelihood estimator** is the value that maximizes the following function:
+
+$$
+\hat{\boldsymbol{\beta}}
+=
+\arg\max_{\boldsymbol{\beta}}
+\;\ell(\boldsymbol{\beta})
+$$ {#eq-mle}
+
+Under appropriate regularity conditions, the MLE possesses several important mathematical properties [@fahrmeir2013, p. 662]:
+
+-   **Consistency**: $\hat{\boldsymbol{\beta}}\xrightarrow{p}\boldsymbol{\beta}_0$ as $n\to\infty$.
+-   **Asymptotic normality**: $$\sqrt{n}\,(\hat{\boldsymbol{\beta}}-\boldsymbol{\beta}_0) \;\xrightarrow{d}\; \mathcal{N}\bigl(\mathbf{0},\,I(\boldsymbol{\beta}_0)^{-1}\bigr),$$ where the **Fisher information** is $$I(\boldsymbol{\beta}) = -\,\mathbb{E}\Bigl[\nabla^2_{\boldsymbol{\beta}} \ell(\boldsymbol{\beta})\Bigr].$$
+-   **Efficiency**: Attains the Cramér-Rao lower bound among unbiased estimators
+
+## Challenges for MLE in Nonlinear Regression
+
+While nonlinear least squares estimation operates under the regularity conditions outlined in @sec-regularity-conditions, maximum likelihood estimation faces significant theoretical challenges when errors are not normally distributed. Unfortunately, readily verifiable conditions for uniqueness, consistency, and asymptotic normality are not easily available from the literature for the general non-normal case, see - among others - in @white1982.
+
+The fundamental issue is that in nonlinear regression, the observations $y_i$ are not identically distributed, having different expected values $f(x_i; \boldsymbol{\beta})$. This breaks the standard i.i.d. assumption underlying classical MLE theory. The general case of independent but not identically distributed observations requires assumptions that are complex and difficult to verify in practice.
+
+Despite these theoretical challenges, when errors are normally distributed, the maximum likelihood estimate coincides with the least squares estimate, allowing us to apply the well-established least squares theory.
+
+### Connection to Nonlinear Least Squares
+
+The relationship between MLE and nonlinear least squares becomes apparent when considering Gaussian errors [@seber_wild_2003, p. 33] If we assume:
+
+$$
+y_i = f(x_i;\boldsymbol{\beta}) + \varepsilon_i, 
+\quad \varepsilon_i\sim N(0,\sigma^2)
+$$
+
+then the first-order condition for $\boldsymbol{\beta}$ yields: $$
+\frac{\partial \ell}{\partial \boldsymbol{\beta}}
+= \frac{1}{\sigma^2}\sum_{i=1}^n\bigl(y_i - f(x_i;\boldsymbol{\beta})\bigr)\,
+  \nabla_{\boldsymbol{\beta}} f(x_i;\boldsymbol{\beta})
+= 0,
+$$
+
+which are exactly the normal equations obtained by minimizing $\sum_{i=1}^n [y_i - f(x_i;\boldsymbol{\beta})]^2$.
+
+```{=latex}
+\vspace{1\baselineskip}
+```
+
+::: {.myremark data-latex="[Asymptotic Efficiency]"}
+Under the assumption of normally distributed errors, the nonlinear least squares estimator is not only equivalent to the maximum likelihood estimator but is also asymptotically efficient. This means it achieves the Cramér-Rao lower bound for variance among unbiased estimators, providing a powerful theoretical justification for the widespread use of NLS [@seber_wild_2003, p. 33].
+:::
+
+```{=latex}
+\vspace{1\baselineskip}
+```
+
+An empirical verification that NLS and MLE estimates coincide under Gaussian errors is provided in @sec-appendix-nls-mle-comparison.
+
+The relationship can thus be visualized as follows:
+
+```{=latex}
+\begin{figure}
+\centering
+\begin{tikzpicture}[
+  scale=0.8, transform shape,
+  every node/.style={transform shape},
+  mainbox/.style={rectangle, draw, thin, fill=gray!15, text width=10cm, minimum height=1cm, align=center, font=\normalsize},
+  typebox/.style={rectangle, draw, thin, fill=gray!15, text width=4.8cm, minimum height=1cm, align=center, font=\normalsize},
+  resultbox/.style={rectangle, draw, thin, fill=gray!15, text width=4.8cm, minimum height=1cm, align=center, font=\normalsize}
+]
+
+% Consistent spacing parameter
+\def\vspace{1.5cm}
+
+% Main box - Error Distribution
+\node[mainbox] (title) at (0,0) {Error Distribution};
+
+% Second level - Two types of errors
+\node[typebox] (nonnormal) at (-2.5,-\vspace) {Non-Normal Errors \\ $\varepsilon \sim$ non-$N(\mu, \sigma^2)$};
+\node[typebox] (normal) at (2.5,-\vspace) {Normal Errors \\ $\varepsilon \sim N(0, \sigma^2)$};
+
+% Third level - Results
+\node[resultbox] (mle_neq) at (-2.5,-2.5*\vspace) {MLE $\neq$ Least Squares};
+\node[resultbox] (mle_eq) at (2.5,-2.5*\vspace) {MLE = Least Squares};
+
+% Connections - vertical lines
+\draw[thin] (title.south) -- (0,-0.5*\vspace);
+\coordinate (split) at (0,-0.5*\vspace);
+\draw[thin] (split) -- (nonnormal.north);
+\draw[thin] (split) -- (normal.north);
+\draw[thin] (nonnormal.south) -- (mle_neq.north);
+\draw[thin] (normal.south) -- (mle_eq.north);
+
+\end{tikzpicture}
+\caption{Relationship Between Error Distribution and Estimation Methods}
+\label{fig:error-distribution}
+\end{figure}
+```
+
+```{=latex}
+\cleardoublepage
+\phantomsection
+\addcontentsline{toc}{chapter}{Practical Implementation}
+\thispagestyle{empty}
+
+\vspace*{\fill}
+\begin{center}
+  \Huge\bfseries Practical Implementation
+\end{center}
+\vspace*{\fill}
+
+\clearpage
+```
+
+## From Theory to Practice
+
+This section puts the theory to work. We assemble a minimal, reproducible R toolkit and then run a compact case study on Michaelis-Menten kinetics. Concretely, we (1) load the packages we rely on, (2) simulate and visualize enzyme-kinetics data, (3) specify the model formally, (4) obtain starting values via domain knowledge, grid search, linearization, and self-starting functions (see @sec-linearization-approach), (5) fit with several optimizers and compare their behavior on the same data (see @sec-algorithm-perf-main), and (6) summarize the practical trade-offs. The case study is introduced in @sec-case-study-michaelis, and longer code listings are found in the appendix.
+
+## R Packages for Nonlinear Regression
+
+This thesis uses a compact R stack. Baseline fits rely on `stats::nls`, with `minpack.lm::nlsLM` (Levenberg-Marquardt) for improved convergence [@elzhov2023], `nls2` to use grid search for starting values [@grothendieck2024], and `nlstools` for diagnostics and bootstrap inference (`nlsBoot`) [@baty_etal_2015]. Visualization is done with `ggplot2`.
+
+Before proceeding with our implementations, we load the necessary packages:
+
+```{r}
+#| label: load-packages
+#| message: false
+#| warning: false
+
+# main packages for nonlinear regression
+library(stats)      
+library(minpack.lm) 
+library(nls2)   
+library(nlstools)
+
+# visualization, usually visualization code not shown, see code chapter 
+library(ggplot2)
+```
+
+## Case Study: Michaelis-Menten Enzyme Kinetics {#sec-case-study-michaelis}
+
+To demonstrate how theoretical principles translate into practice, we will walk through an analysis of enzyme kinetics data using the Michaelis-Menten model, as introduced in earlier chapters.
+
+### Step 1: Understanding the Data Pattern
+
+Enzyme kinetics data typically exhibit a characteristic hyperbolic relationship between substrate concentration and reaction velocity [@ritz_streibig_2008, pp. 9-16]. Initially, as substrate concentration increases, reaction velocity increases rapidly . However, as the enzyme becomes saturated, the reaction velocity approaches an asymptotic maximum-a key feature of enzyme-catalyzed reactions known as the maximum velocity (Vmax).
+
+In our theoretical development, we demonstrated why analytical solutions to the normal equations for such nonlinear models are are generally not available. This mathematical characteristic necessitates the iterative numerical approaches we have established.
+
+To demonstrate these concepts, we generate synthetic enzyme kinetics data that exhibits the characteristic hyperbolic relationship:
+
+```{r}
+#| message: false
+#| warning: false
+#| fig-height: 3
+
+# simulate data
+set.seed(2025)  
+substrate <- seq(0, 10, length.out = 20) 
+
+# true parameters
+true_Vmax <- 100
+true_Km <- 2.5
+
+# generate observations with noise
+velocity <- true_Vmax * substrate / (true_Km + substrate) + 
+            rnorm(length(substrate), sd = 5)
+enzyme_data <- data.frame(substrate = substrate, velocity = velocity)
+```
+
+```{r}
+#| label: enzyme-data-points
+#| fig-cap: "Enzyme kinetics data points following the Michaelis-Menten trend."
+#| fig-width: 6
+#| fig-height: 4
+#| echo: false
+ggplot(enzyme_data, aes(x = substrate, y = velocity)) +
+  geom_point(shape = 21, size = 3, fill = "white", color = "black") +
+  theme_thesis(base_family = "serif") +
+  labs(
+    x = "Substrate Concentration",
+    y = "Reaction Velocity"
+  )
+```
+
+The plot above illustrates approximately the expected saturation behavior of enzyme kinetics, where the reaction velocity initially increases with substrate concentration before gradually leveling off toward a maximum.
+
+### Step 2: Formal Model Specification {#sec-michaelis-menten}
+
+Following our theoretical framework, we formally specify the Michaelis-Menten regression model as introduced in @eq-michaelis-menten as presented by @bates_watts_1988 [p. 33] and adapted in @ritz_streibig_2008 [p. 9]:
+
+$$
+v = \frac{V_{\max}\,[S]}{K_m + [S]} + \varepsilon, \qquad
+\varepsilon \sim \mathcal{N}(0,\sigma^2)
+\tag{\ref{eq-michaelis-menten}}
+$$
+
+Note that the nonlinearity of the Michaelis-Menten is analyzed in @sec-appendix-mm-example.
+
+### Step 3: Determining Initial Parameter Estimates {#sec-case-study-initial-parameters}
+
+As emphasized in our theoretical development, see @sec-remark-importance, nonlinear optimization algorithms require initial parameter estimates to begin the iterative process. The optimization surface for nonlinear regression often contains multiple local minima, making starting values crucial for finding the global optimum.
+
+For the Michaelis-Menten model, we can leverage theoretical understanding of parameter interpretations to make informed initial estimates:
+
+1.  **Estimating** $V_{max}$ (maximum velocity): Since $V_{max}$ represents the asymptotic maximum reaction velocity, we can use the highest observed velocity value as a starting point.
+
+2.  **Estimating** $K_m$ (Michaelis constant): @motulsky2004 [p. 252] suggests that a reasonable rule for choosing an initial value for $K_m$ is to use 20% of the maximal substrate concentration (X value).
+
+These parameter estimates are grounded in biochemical theory rather than arbitrary numerical guesses. This approach exemplifies how theoretical domain knowledge can inform the statistical estimation process.
+
+In R, the domain knowledge approach is implemented as follows.
+
+```{r}
+#| label: initial-parameters
+#| message: false
+#| warning: false
+
+# estimate Vmax
+max_observed_velocity <- max(enzyme_data$velocity)
+initial_Vmax <- max_observed_velocity
+
+# estimate Km
+max_substrate <- max(enzyme_data$substrate)
+initial_Km <- 0.2 * max_substrate
+
+cat("Vmax:", round(initial_Vmax, 1))
+cat("Km:", round(initial_Km, 2))
+```
+
+The package `nlstools` offers the function `preview()` that helps graphically assess the suitability of these starting values before fitting the model. We thus use the function with the argument `start = list(Vmax = 92.1, Km = 2)`:
+
+```{r}
+#| message: false
+#| warning: false
+
+# define the model formula for better overview
+formula_MM <- velocity ~ Vmax * substrate / (Km + substrate)
+
+# preview the model with initial values
+preview(formula_MM, data = enzyme_data, start = list(Vmax = 92.1, Km = 2))
+```
+
+This plot provides both a visual and quantitative assessment of the initial parameter estimates. The close alignment between the predicted values (red crosses) and the observed data (black circles) visually suggests a good starting point. This is quantitatively supported by a relatively low RSS of 489, confirming that the initial parameters are suitable for the model fitting procedure.
+
+#### Four Practical Approaches to Finding Starting Values
+
+To generalize beyond this case study, we now present the four main strategies for obtaining reliable starting values: domain knowledge, grid search, linearization, and self-starting functions—each balancing interpretability, robustness, and computational cost.
+
+##### Domain Knowledge Approach
+
+The domain knowledge approach directly applies theoretical understanding of parameters to derive initial estimates. For the Michaelis-Menten model, this means interpreting $V_{max}$ as the asymptotic maximum reaction velocity and $K_m$ as the substrate concentration at half-maximum velocity.
+
+This approach extends to many other nonlinear models:
+
+-   For growth curve models, initial size and asymptotic maximum size often have clear biological interpretations
+-   For pharmacokinetic models, parameters like clearance rate and volume of distribution have physiological meanings
+-   For psychological models, parameters often represent cognitive thresholds or processing capacities
+
+Domain knowledge not only provides plausible starting values but also constrains the parameter search to biochemically meaningful regions. As already illustrated in the case study on enzyme kinetics just above (see @sec-case-study-initial-parameters), domain knowledge can be a powerful tool for initializing parameter values in nonlinear regression. In that example, we used theoretical insights-such as $V_{\max}$ representing the asymptotic maximum velocity and $K_m$ denoting the substrate concentration at half-maximal velocity-to derive plausible starting values. These informed guesses led to rapid and accurate convergence of the optimization algorithms.
+
+##### Grid Search Method
+
+The grid search method provides a systematic way to explore the parameter space, especially when there is uncertainty or limited prior knowledge about good starting values. Instead of relying on a single initial guess, grid search evaluates the model at many predefined combinations of parameter values. As a practical heuristic, we center the grid around data-based initials: set $V_{\max} \approx \max(Y)$ and $K_m \approx 0.2 \times \max(X)$, then search over a modest neighborhood of these values [@motulsky2004, p. 252] .
+
+Each combination of these values is used to fit the model, and the one yielding the lowest RSS is selected as the best candidate for further refinement through local optimization.
+
+This approach is particularly helpful when:
+
+-   Domain knowledge is limited or vague
+-   Parameters lack clear physical interpretation
+-   The model landscape includes multiple local minima
+-   Previous optimization attempts have failed to converge
+
+Grid search improves reliability at the cost of computation time. Rather than hoping for a good initial guess, it systematically searches through the parameter space to find a robust starting point. The implementation details for grid search are provided in @sec-appendix-grid-search
+
+##### Linearization Approach {#sec-linearization-approach}
+
+The linearization approach transforms nonlinear models into linear ones through algebraic manipulation, enabling analytical estimation of parameters as a starting point. For enzyme kinetics, the Lineweaver-Burk transformation represents a classic example [@lineweaver1934].
+
+Starting with the Michaelis-Menten equation: $v = \frac{V_{max} \cdot [S]}{K_m + [S]}$
+
+Taking the reciprocal of both sides yields: $\frac{1}{v} = \frac{K_m}{V_{max}} \cdot \frac{1}{[S]} + \frac{1}{V_{max}}$
+
+This transformation creates a linear relationship between $\frac{1}{v}$ and $\frac{1}{[S]}$ with slope $\frac{K_m}{V_{max}}$ and intercept $\frac{1}{V_{max}}$. Linear regression on this transformed data provides initial estimates for both parameters. The detailed implementation of the Lineweaver-Burk linearization is provided in @sec-appendix-linearization.
+
+However, as noted in @sec-multiplicative-errors, such transformations distort error structures. The original error $\varepsilon$ in $v = f([S]) + \varepsilon$ becomes non-constant when transformed, violating homoscedasticity assumptions. Consequently, linearized estimates serve as starting values for proper nonlinear estimation rather than final parameter estimates.
+
+A detailed practical implementation of the linearization approach is found in @sec-appendix-linearization.
+
+##### Self-Starting Functions {#sec-self-starting-functions}
+
+The approach of self-starting functions address the issue of finding appropriate starting values by embedding heuristic or domain-specific logic into the model itself.
+
+These functions are well-designed algorithms that often leverage the other techniques discussed (such as linearization) internally to generate excellent initial guesses automatically [@ritz_streibig_2008, p. 29] .
+
+In this chapter, we distinguish two types of self-starting approaches:
+
+1.  **Built-in self-starting functions**: prepackaged in R for common models.
+2.  **Custom self-starting functions**: designed and implemented manually to reflect the structure and domain knowledge of specific models.
+
+###### Built-in Self-Starting Functions {#sec-built-in-starting-function}
+
+Several classical nonlinear models are supported by R's built-in self-starting functions. These include, adapted from @ritz_streibig_2008 [p. 133]:
+
+| Model Type | Self-Starting Function | Formula Structure |
+|------------------------|------------------------|------------------------|
+| Michaelis-Menten | `SSmicmen` | $y = \frac{V_m x}{K + x}$ |
+| Logistic Growth | `SSlogis` | $y = \frac{\phi_1}{1 + \exp((\phi_2 - x)/\phi_3)}$ |
+| Gompertz Curve | `SSgompertz` | $y = \phi_1 \exp(-\phi_2 \cdot \phi_3^x))$ |
+| Weibull-like Growth | `SSweibull` | $y = \phi_1 - \phi_2\cdot exp(-exp(\phi_3\cdot x^{\phi_4})$ |
+| Exponential Decay | `SSasymp` | $y = \phi_1 + (\phi_2 - \phi_1) \exp(-exp(\phi_3)\cdot x)$ |
+
+These models can be fit directly using `nls()` without manually specifying starting values. Internally, each of these functions contains a default starting function based on model-specific heuristics. Additional self-starting functions are available in specialized packages, such as the `drc` package for dose-response models [@ritz2020, p. 171].
+
+Let us demonstrate this with the Michaelis-Menten model:
+
+```{r}
+#| label: builtin-mmicmen-corrected
+#| warning: false
+#| message: false
+
+# data prep
+enzyme_data_pos <- subset(enzyme_data, substrate > 0)
+
+# fit model
+fit_mm <- nls(
+  velocity ~ SSmicmen(substrate, Vm, K),
+  data = enzyme_data_pos
+)
+
+summary(fit_mm)
+```
+
+The use of `SSmicmen` removes the need to specify initial values manually, thanks to internal logic based on the biochemical interpretation of the parameters. In fact, as the summary shows, `nls` needed 0 iterations to converge. The self-starting estimates from `SSmicmen` were already within the convergence tolerance.
+
+###### Custom Self-Starting Functions {#sec-custom-selfstart}
+
+When none of R's built-in self-starting functions apply-or when you have domain knowledge suggesting better heuristics-you can define your own *self-starting function*. The process and a complete example are provided in @sec-appendix-custom-selfstart, as well as in @ritz_streibig_2008 [pp. 31-34]. Notice how custom self-starting functions often use linearization (log-transformation) internally, demonstrating how these functions combine analytical methods with automated implementation.
+
+### Step 4: Comparing Optimization Algorithms on Real Data {#sec-algorithms-real-data}
+
+Returning to the Michaelis–Menten case study, we now implement one such strategy and compare the performance of competing optimization algorithms.
+
+To fit the model using `nls`, we supply three key components:
+
+-   a **model formula** based on the Michaelis-Menten equation,
+-   **starting values** for the parameters $V_{\text{max}}$ and $K_m$,
+-   and the **algorithm** to be used for the nonlinear optimization.
+
+These inputs are passed to the `nls()` or `nlsLM()` functions in R, which estimate the parameters by minimizing the difference between observed and predicted values.
+
+The convergence behavior of nonlinear optimization algorithms depends critically on numerical tolerances and iteration limits. The `nls.control()` function provides precise control over these algorithmic parameters, allowing us to balance computational efficiency against solution accuracy [@ritz_streibig_2008, p. 52]. The key control parameters include:
+
+-   **`maxiter`**: Maximum number of iterations before termination (default: 50). Insufficient iterations may prevent convergence in complex parameter spaces, while excessive iterations waste computational resources when the algorithm has stalled.
+-   **`tol`**: Relative convergence tolerance (default: $1 \times 10^{-5}$). This parameter determines when $\|\mathbf{p}_{k+1} - \mathbf{p}_k\|/\|\mathbf{p}_k\| < \text{tol}$, where $\mathbf{p}_k$ represents the parameter vector at iteration $k$. Smaller values yield more precise estimates but require more iterations.
+-   **`minFactor`**: Minimum step size factor (default: $1/1024$). This prevents the algorithm from taking infinitesimally small steps, which would indicate numerical instability or convergence to a saddle point rather than a minimum.
+
+```{r}
+#| echo: true
+control_strict <- nls.control(maxiter = 100, tol = 1e-8, 
+                              minFactor = 1/2048)
+control_relaxed <- nls.control(maxiter = 25, tol = 1e-4, 
+                               minFactor = 1/512)
+
+# stricter tolerances ensure higher precision but require more iterations
+# relaxed tolerances converge faster but may sacrifice accuracy
+```
+
+The following code demonstrates how each algorithm from our theoretical discussion performs on the same dataset. Note that an implementation of the p-linear algorithm is found in @ritz_streibig_2008 [pp. 41-43] instead.
+
+```{r}
+#| message: false
+#| warning: false
+
+# define the Michaelis-Menten model formula
+mm_formula <- velocity ~ Vmax * substrate / (Km + substrate)
+
+# use the starting values found above
+start_vals <- list(Vmax = initial_Vmax, Km = initial_Km)
+
+# fit models with different algorithms
+fit_methods <- list(
+  "Gauss-Newton" = nls(mm_formula, data = enzyme_data, start = start_vals),
+  "Levenberg-Marquardt" = nlsLM(mm_formula, data = enzyme_data, start = start_vals),
+  "PORT (Constrained)" = nls(mm_formula, data = enzyme_data, start = start_vals,
+                             algorithm = "port", lower = c(Vmax = 0, Km = 0))
+)
+
+# extract and compare parameter estimates
+results <- lapply(fit_methods, coef)
+results_table <- do.call(rbind, results)
+results_table <- as.data.frame(results_table)
+results_table$Method <- rownames(results_table)
+rownames(results_table) <- NULL
+
+# display comparison table
+results_table <- results_table[, c("Method", "Vmax", "Km")]
+knitr::kable(results_table, digits = c(NA, 1, 2),
+             caption = "Estimated parameters from different fitting algorithms")
+```
+
+All three algorithms yield identical parameter estimates, suggesting stable and consistent model behavior on this simulated dataset. This convergence to the same solution validates our theoretical understanding that, with good starting values and well-behaved data, different algorithms should find the same global minimum.
+
+For a more comprehensive analysis of convergence speed and reliability across different scenarios, see @sec-algorithm-perf-benchmark.
+
+### Step 5: Visualizing Model Fits and Parameter Accuracy
+
+Lastly, visualizing the estimated model alongside the observed data provides a crucial qualitative assessment of fit quality. For Michaelis-Menten models, a well-fitted curve should capture the initial near-linear increase at low substrate concentrations and the gradual approach to asymptotic maximum at high concentrations.
+
+```{r}
+#| label: fig-enzyme-lm-simple
+#| echo: false
+#| fig-cap: "Enzyme kinetics: data (points), LM fit (solid), theoretical (dashed)."
+#| message: false
+#| warning: false
+
+# select Levenberg-Marquardt fit for visualization
+fit_lm <- fit_methods[["Levenberg-Marquardt"]]
+
+# create smooth curve for plotting
+x_curve <- seq(min(enzyme_data$substrate), max(enzyme_data$substrate), length.out = 100)
+
+# compute fitted and theoretical curves
+y_fit <- predict(fit_lm, newdata = data.frame(substrate = x_curve))
+y_theoretical <- true_Vmax * x_curve / (true_Km + x_curve)
+
+# create visualization
+ggplot() +
+  geom_point(
+    data = enzyme_data,
+    aes(substrate, velocity),
+    shape = 21, fill = "white", color = "black", size = 2
+  ) +
+  geom_line(
+    data = data.frame(x = x_curve, y = y_fit),
+    aes(x, y), linetype = "solid", size = 0.8
+  ) +
+  geom_line(
+    data = data.frame(x = x_curve, y = y_theoretical),
+    aes(x, y), linetype = "dashed", size = 0.8
+  ) +
+  theme_thesis(base_family = "serif") +
+  labs(
+    x = "Substrate Concentration",
+    y = "Reaction Velocity"
+  )
+```
+
+The solid black line (LM fit) in @fig-enzyme-lm-simple closely tracks the dashed curve (theoretical Michaelis-Menten), showing that the fitting algorithm reliably recovers the underlying kinetics even in the presence of experimental noise.
+
+This successful application to the Michaelis-Menten model demonstrates the workflow on a well-behaved dataset. However, to generalize these findings and understand how different algorithms perform under a wider range of conditions, a more comprehensive comparative evaluation is necessary.
+
+## Comparative Evaluation {#sec-comparative-evaluation}
+
+The theoretical sections of this chapter have established the mathematical foundations of parameter estimation in nonlinear regression, from the formulation of least squares to the development of advanced optimization algorithms. While these theoretical insights provide a crucial understanding of the underlying principles, the practical application of these methods requires empirical validation and comparison. This section aims to bridge that gap.
+
+Therefore, this chapter introduces a comprehensive framework for empirically evaluating two critical aspects of nonlinear regression:
+
+1.  **Starting Value Determination**: How different approaches to finding initial parameter estimates affect convergence and final parameter values.
+2.  **Optimization Algorithm Performance**: How different algorithms compare in terms of efficiency, reliability, and accuracy.
+
+### Experimental Setup for Comparative Analysis
+
+For our evaluations, we implement a controlled testing environment with these key components:
+
+#### Models for Evaluation
+
+Our test set includes four known nonlinear models of varying complexity:
+
+1.  **Michaelis-Menten Model** (2 parameters): $$y = \frac{V_{max} \cdot x}{K_m + x}$$ A fundamental model in enzyme kinetics with moderate nonlinearity.
+2.  **Exponential Growth Model** (2 parameters): $$y = y_0 \cdot \exp(r \cdot x)$$ A simple exponential model with strong parameter interaction.
+3.  **Gompertz Growth Model** (3 parameters): $$y = Asym \cdot \exp(-b2 \cdot b3^x))$$ A sigmoidal growth model with increased dimensionality and complex parameter interactions.
+4.  **Dose-Response Model** (4 parameters): $$y = d + \frac{a - d}{1 + (x/c)^b}$$ A complex sigmoidal model with multiple interacting parameters and high nonlinearity.
+
+The implementation of the comparisons is found in @sec-starting-value-eval for the starting value analysis and in @sec-algorithm-perf-benchmark for the optimization algorithms. In the following, the main results are discussed.
+
+```{r setup-hidden}
+#| label: full-analysis-script
+#| echo: false
+#| warning: false
+#| eval: true
+#| message: false
+
+library(stats)
+library(drc)
+library(dplyr)
+library(tidyr)
+library(tibble)
+
+set.seed(123)
+
+models <- list(
+  MM = list(
+    formula = y ~ Vmax * x/(Km + x),
+    true_params = list(Vmax = 100, Km = 2.5)
+  ),
+  Exp = list(
+    formula = y ~ y0 * exp(r * x),
+    true_params = list(y0 = 1, r = 0.2)
+  ),
+  Gompertz = list(
+    formula = y ~ Asym * exp(-b2 * b3^x),
+    true_params = list(Asym = 5, b2 = 1.6, b3 = 0.8)
+  ),
+  DoseResp = list(
+    formula = y ~ d + (a - d)/(1 + (x/c)^b),
+    true_params = list(a = 10, d = 1, c = 5, b = 2)
+  )
+)
+
+expModel <- function(x, y0, r) y0 * exp(r * x)
+expModelInit <- function(mCall, LHS, data) {
+  xy <- sortedXyData(mCall[["x"]], LHS, data)
+  xy <- xy[xy[, "y"] > 0, ]
+  fit <- lm(log(xy[, "y"]) ~ xy[, "x"])
+  b <- coef(fit)
+  val <- c(y0 = exp(b[1]), r = b[2])
+  names(val) <- mCall[c("y0", "r")]
+  val
+}
+SSexp <- selfStart(expModel, expModelInit, c("y0", "r"))
+
+make_data <- function(m, n = 200, sd = 0.5) {
+  x <- seq(0, 10, length.out = n)
+  env <- c(as.list(m$true_params), list(x = x))
+  mu <- eval(m$formula[[3]], envir = env)
+  y <- mu + rnorm(n, sd = sd)
+  data.frame(x, y)
+}
+
+domain_starts <- function(dat, name, m) {
+  if (name == "MM") {
+    list(Vmax = max(dat$y, na.rm = TRUE),
+         Km   = 0.2 * max(dat$x, na.rm = TRUE))
+  } else if (name == "Exp") {
+    list(y0 = dat$y[1],
+         r  = log(dat$y[nrow(dat)] / dat$y[1]) / max(dat$x))
+  } else if (name == "Gompertz") {
+    A  <- 1.1 * max(dat$y, na.rm = TRUE)
+    y0 <- dat$y[which.min(dat$x)]
+    if (y0 <= 0) y0 <- 1e-6
+    list(Asym = A, b2 = -log(y0 / A), b3 = 0.5)
+  } else {
+    list(a = 1.05 * max(dat$y, na.rm = TRUE),
+         d = 0.95 * min(dat$y, na.rm = TRUE),
+         c = median(dat$x, na.rm = TRUE),
+         b = 1)
+  }
+}
+
+grid_starts <- function(dat, name, m) {
+  center <- domain_starts(dat, name, m)
+  pnames <- names(center)
+
+  grids <- lapply(pnames, function(p) {
+    s <- center[[p]]
+    lo <- if (is.finite(s) && s != 0) s/3 else 1e-6
+    hi <- if (is.finite(s) && s != 0) 3*s else 1
+    seq(lo, hi, length.out = 20)
+  })
+  names(grids) <- pnames
+
+  G <- expand.grid(grids, KEEP.OUT.ATTRS = FALSE)
+  rss <- apply(G, 1, function(row) {
+    pars <- as.list(row)
+    env  <- c(pars, as.list(dat))
+    yhat <- eval(m$formula[[3]], envir = env)
+    sum((dat$y - yhat)^2)
+  })
+  as.list(G[which.min(rss), , drop = FALSE])
+}
+
+linear_starts <- function(dat, name, m) {
+  if (name == "MM") {
+    z <- subset(dat, x > 0 & y > 0)
+    fit <- lm(I(1/y) ~ I(1/x), data = z)
+    Vm <- 1/coef(fit)[1]
+    Km <- coef(fit)[2] * Vm
+    list(Vmax = Vm, Km = Km)
+  } else if (name == "Exp") {
+    z <- subset(dat, y > 0)
+    fit <- lm(log(y) ~ x, data = z)
+    list(y0 = exp(coef(fit)[1]), r = coef(fit)[2])
+  } else {
+    NULL
+  }
+}
+
+run_eval <- function(f, which = names(models)) {
+  out <- data.frame()
+  for (nm in which) {
+    m <- models[[nm]]
+    dat <- make_data(m)
+    t0 <- Sys.time()
+    s  <- f(dat, nm, m)
+    t1 <- Sys.time()
+    secs <- as.numeric(difftime(t1, t0, units = "secs"))
+    if (!is.null(s)) {
+      for (p in names(m$true_params)) {
+        truth <- m$true_params[[p]]
+        est   <- s[[p]]
+        out <- rbind(out, data.frame(
+          Model = nm,
+          Parameter = p,
+          RelativeDeviation = abs(est - truth) / abs(truth) * 100,
+          AbsoluteDeviation = abs(est - truth),
+          Time = secs
+        ))
+      }
+    }
+  }
+  out
+}
+
+dk_results  <- run_eval(domain_starts)
+gs_results  <- run_eval(grid_starts)
+lin_results <- run_eval(linear_starts, which = c("MM", "Exp"))
+
+ss_results <- data.frame()
+
+dat_mm <- make_data(models$MM)
+t0 <- Sys.time()
+ini_mm <- try(stats::getInitial(y ~ SSmicmen(x, Vm, K), data = subset(dat_mm, x > 0)), silent = TRUE)
+t1 <- Sys.time()
+if (!inherits(ini_mm, "try-error")) {
+  tru <- models$MM$true_params
+  ss_results <- rbind(ss_results, data.frame(
+    Model = "MM", Parameter = names(tru), Time = as.numeric(difftime(t1, t0, units = "secs")),
+    RelativeDeviation = c(abs(ini_mm["Vm"] - tru$Vmax)/tru$Vmax,
+                          abs(ini_mm["K"]  - tru$Km)  /tru$Km) * 100,
+    AbsoluteDeviation = c(abs(ini_mm["Vm"] - tru$Vmax),
+                          abs(ini_mm["K"]  - tru$Km))
+  ))
+}
+
+dat_exp <- make_data(models$Exp)
+t0 <- Sys.time()
+ini_exp <- try(stats::getInitial(y ~ SSexp(x, y0, r), data = dat_exp), silent = TRUE)
+t1 <- Sys.time()
+if (!inherits(ini_exp, "try-error")) {
+  tru <- models$Exp$true_params
+  ss_results <- rbind(ss_results, data.frame(
+    Model = "Exp", Parameter = names(tru), Time = as.numeric(difftime(t1, t0, units = "secs")),
+    RelativeDeviation = c(abs(ini_exp["y0"] - tru$y0)/tru$y0,
+                          abs(ini_exp["r"]  - tru$r) /tru$r ) * 100,
+    AbsoluteDeviation = c(abs(ini_exp["y0"] - tru$y0),
+                          abs(ini_exp["r"]  - tru$r))
+  ))
+}
+
+dat_gom <- make_data(models$Gompertz)
+t0 <- Sys.time()
+ini_gom <- try(stats::getInitial(y ~ SSgompertz(x, Asym, b2, b3), data = subset(dat_gom, y > 0)), silent = TRUE)
+t1 <- Sys.time()
+if (!inherits(ini_gom, "try-error")) {
+  tru <- models$Gompertz$true_params
+  ss_results <- rbind(ss_results, data.frame(
+    Model = "Gompertz", Parameter = names(tru), Time = as.numeric(difftime(t1, t0, units = "secs")),
+    RelativeDeviation = c(abs(ini_gom["Asym"] - tru$Asym)/tru$Asym,
+                          abs(ini_gom["b2"]  - tru$b2) /tru$b2,
+                          abs(ini_gom["b3"]  - tru$b3) /tru$b3) * 100,
+    AbsoluteDeviation = c(abs(ini_gom["Asym"] - tru$Asym),
+                          abs(ini_gom["b2"]  - tru$b2),
+                          abs(ini_gom["b3"]  - tru$b3))
+  ))
+}
+
+dat_dr <- subset(make_data(models$DoseResp), x > 0)
+t0 <- Sys.time()
+fit_dr <- try(suppressWarnings(drc::drm(y ~ x, data = dat_dr, fct = LL.4())), silent = TRUE)
+ini_dr <- try(drc::getInitial(fit_dr), silent = TRUE)
+t1 <- Sys.time()
+if (!inherits(fit_dr, "try-error") && !inherits(ini_dr, "try-error")) {
+  tru <- models$DoseResp$true_params
+  rel <- c(
+    abs(ini_dr["d:(Intercept)"] - tru$a) / tru$a,
+    abs(ini_dr["c:(Intercept)"] - tru$d) / tru$d,
+    abs(ini_dr["e:(Intercept)"] - tru$c) / tru$c,
+    abs(ini_dr["b:(Intercept)"] - tru$b) / tru$b
+  ) * 100
+  absd <- c(
+    abs(ini_dr["d:(Intercept)"] - tru$a),
+    abs(ini_dr["c:(Intercept)"] - tru$d),
+    abs(ini_dr["e:(Intercept)"] - tru$c),
+    abs(ini_dr["b:(Intercept)"] - tru$b)
+  )
+  ss_results <- rbind(ss_results, data.frame(
+    Model = "DoseResp", Parameter = names(tru),
+    Time = as.numeric(difftime(t1, t0, units = "secs")),
+    RelativeDeviation = rel, AbsoluteDeviation = absd
+  ))
+}
+
+summarize_results <- function(df) {
+  if (nrow(df) == 0) return(tibble(MeanRelativeDeviation = NA_real_, MeanAbsoluteDeviation = NA_real_, AverageSpeed = NA_real_))
+  msum <- aggregate(cbind(RelativeDeviation, AbsoluteDeviation) ~ Model, data = df, FUN = mean)
+  tsum <- aggregate(Time ~ Model, data = df, FUN = mean)
+  all  <- merge(msum, tsum)
+  tibble(
+    MeanRelativeDeviation = mean(all$RelativeDeviation),
+    MeanAbsoluteDeviation = mean(all$AbsoluteDeviation),
+    AverageSpeed = mean(all$Time)
+  )
+}
+
+dk_summary  <- summarize_results(dk_results)
+gs_summary  <- summarize_results(gs_results)
+lin_summary <- summarize_results(lin_results)
+ss_summary  <- summarize_results(ss_results)
+
+```
+
+### Results
+
+#### Starting Value Methods: Comparative Performance
+
+The comparative evaluation assess the accuracy and efficiency of four methods for generating starting values in nonlinear regression: domain knowledge, grid search, linearization, and self-starting functions. These approaches are systematically tested across the four canonical nonlinear models using synthetic data with known true parameters to ensure a controlled comparison. Performance is quantified by two key metrics: the mean relative deviation of the initial estimates from their true values and the computational time required for each method.
+
+{{< pagebreak >}}
+
+```{r summary-starting-methods}
+#| echo: false
+#| message: false
+#| warning: false
+#| label: tbl-summary-starting-methods
+#| tbl-cap: "Summary and Comparison of Starting Value Generation Methods"
+
+library(knitr)
+library(tibble)
+
+summary_df <- tibble::tribble(
+  ~Method,               ~`Avg. Accuracy (Mean Rel. Dev. %)`, ~`Avg. Speed (s)`, ~`Key Trade-offs`,
+  "Self-Starting",       round(ss_summary$MeanRelativeDeviation, 1),    ss_summary$AverageSpeed, "Best balance of speed and accuracy; limited availability.",
+  "Linearization",       round(lin_summary$MeanRelativeDeviation, 1),   lin_summary$AverageSpeed, "Extremely fast but only for specific models; can be biased.",
+  "Grid Search",         round(gs_summary$MeanRelativeDeviation, 1),    gs_summary$AverageSpeed, "Systematic but very slow for models with many parameters.",
+  "Domain Knowledge",    round(dk_summary$MeanRelativeDeviation, 1),    dk_summary$AverageSpeed, "Simple and intuitive but often unreliable and subjective."
+)
+
+knitr::kable(summary_df)
+```
+
+On balance, **self-starting functions** provide the most favorable speed-accuracy profile: they achieve the lowest mean relative deviation while remaining among the fastest. **Linearization** yields the shortest runtimes but is only applicable to models that admit a tractable transformation and can introduce approximation bias; it is also nontrivial to implement reliably. **Grid search** can, in principle, attain very high accuracy, yet its computational cost scales rapidly with the number of parameters and grid density. In our setup it already required significantly more time with \~20 grid points per parameter, and finer grids would increase runtime substantially. **Domain-knowledge initializations** are in theory costless but substantially less accurate on average, with results sensitive to the choice and quality of literature values (see @sec-domain-knowledge).
+
+**Recommendation.** Use self-starting functions whenever available. Otherwise, prefer grid search when accuracy is paramount and compute is available; resort to domain-knowledge starts when speed is critical and strong priors justify the choice.
+
+#### Optimization Algorithm Performance {#sec-algorithm-perf-main}
+
+```{r algorithm-simulation}
+#| echo: false
+#| warning: false
+#| message: false
+
+library(minpack.lm)
+library(dplyr)
+
+set.seed(123)
+
+models <- list(
+  MM = list(
+    formula = y ~ Vmax * x / (Km + x),
+    true_params = list(Vmax = 100, Km = 2.5)
+  ),
+  Exp = list(
+    formula = y ~ y0 * exp(r * x),
+    true_params = list(y0 = 1, r = 0.2)
+  ),
+  Gompertz = list(
+    formula = y ~ A * exp(-B * exp(-C * x)),
+    true_params = list(A = 5, B = 1, C = 0.5)
+  ),
+  DoseResp = list(
+    formula = y ~ d + (a - d) / (1 + (x / c)^b),
+    true_params = list(a = 10, d = 1, c = 5, b = 2)
+  )
+)
+
+reps <- 30
+deviation_levels <- c(5, 10, 25, 50, 100)
+methods <- c("GaussNewton", "LM", "PORT", "Newton")
+n_points <- 150
+noise_sd <- 1.5
+
+make_data <- function(spec) {
+  x <- seq(0.1, 15, length.out = n_points)
+  mu <- eval(spec$formula[[3]], envir = c(spec$true_params, list(x = x)))
+  y <- mu + rnorm(n_points, sd = noise_sd)
+  data.frame(x = x, y = y)
+}
+
+perturb_starts <- function(true_params, dev) {
+  lapply(true_params, function(p) p * (1 + sample(c(-1, 1), 1) * dev / 100))
+}
+
+param_err_pct <- function(estimated, truth) {
+  e <- unlist(estimated)[names(truth)]
+  t <- unlist(truth)
+  mean(abs(e - t) / pmax(abs(t), 1e-8)) * 100
+}
+
+fit_once <- function(method, spec, data, start_list) {
+  if (method == "GaussNewton") {
+    nls(spec$formula, data = data, start = start_list,
+        control = nls.control(maxiter = 100, warnOnly = TRUE))
+  } else if (method == "LM") {
+    nlsLM(spec$formula, data = data, start = start_list,
+          control = nls.lm.control(maxiter = 100))
+  } else if (method == "PORT") {
+    nls(spec$formula, data = data, start = start_list, algorithm = "port",
+        control = nls.control(maxiter = 100, warnOnly = TRUE))
+  } else if (method == "Newton") {
+    start_vec <- unlist(start_list)
+    pnames <- names(start_vec)
+    rss <- function(par) {
+      names(par) <- pnames
+      yhat <- eval(spec$formula[[3]], envir = c(as.list(par), list(x = data$x)))
+      sum((data$y - yhat)^2)
+    }
+    nlm(rss, p = start_vec, iterlim = 100)
+  }
+}
+
+converged_ok <- function(fit, method) {
+  if (inherits(fit, "try-error")) return(FALSE)
+  if (method == "Newton") return(fit$code %in% 1:3)
+  if (!is.null(fit$convInfo) && !is.null(fit$convInfo$isConv)) return(isTRUE(fit$convInfo$isConv))
+  is.finite(sum(resid(fit)^2))
+}
+
+rss_of <- function(fit, method, data, spec) {
+  if (method == "Newton") return(fit$minimum)
+  sum(resid(fit)^2)
+}
+
+params_of <- function(fit, method, spec, start_list) {
+  if (method == "Newton") {
+    est <- fit$estimate
+    names(est) <- names(spec$true_params)
+    est
+  } else {
+    coef(fit)
+  }
+}
+
+results <- list()
+
+for (i in seq_len(reps)) {
+  for (model_name in names(models)) {
+    spec <- models[[model_name]]
+    dat <- make_data(spec)
+
+    for (dev in deviation_levels) {
+      start_list <- perturb_starts(spec$true_params, dev)
+
+      for (m in methods) {
+        t0 <- Sys.time()
+        fit <- try(fit_once(m, spec, dat, start_list), silent = TRUE)
+        t1 <- Sys.time()
+
+        ok <- converged_ok(fit, m)
+        rss <- if (ok) rss_of(fit, m, dat, spec) else NA
+        perr <- if (ok) param_err_pct(params_of(fit, m, spec, start_list), spec$true_params) else NA
+
+        results[[length(results) + 1]] <- data.frame(
+          Rep = i, Model = model_name, Method = m, Deviation = dev,
+          Converged = ok,
+          ElapsedTime = as.numeric(difftime(t1, t0, units = "secs")),
+          FinalRSS = rss,
+          ParamError = perr
+        )
+      }
+    }
+  }
+}
+
+results_df <- bind_rows(results)
+
+```
+
+The comparative evaluation of optimization algorithms is designed to reveal fundamental differences in robustness and efficiency across the four distinct nonlinear models. The tested algorithms include specialized least-squares methods (Gauss-Newton, Levenberg-Marquardt, PORT) and a general-purpose quasi-Newton optimizer (`nlm`) to represent the family of second-order methods that avoid impractical analytical Hessians. Testing encompasses 30 replications per configuration, with initial parameter deviations systematically ranging from 5% to 100% of the true values to simulate varying degrees of difficulty. Performance is ultimately assessed based on convergence rate, parameter accuracy, and computational efficiency, with a uniform iteration limit of 100 applied to all methods for a fair comparison.
+
+```{r overall-algorithm-summary}
+#| label: fig-summary-three-plots
+#| fig-cap: "Summary of algorithm performance."
+#| echo: false
+#| warning: false
+#| message: false
+
+# Load required libraries
+source("setup.R")
+library(dplyr)
+library(scales)
+library(ggplot2)
+library(patchwork)
+
+# --- 1. CREATE THE SUMMARY DATA ---
+# This code assumes your 'results_df' from the simulation is already in memory.
+summary_data <- results_df %>%
+  group_by(Deviation, Method) %>%
+  summarise(
+    `Convergence Rate (%)` = mean(Converged) * 100,
+    `Mean Error (%)` = mean(ParamError[Converged], na.rm = TRUE),
+    `Mean Time (ms)` = mean(ElapsedTime) * 1000,
+    .groups = 'drop'
+  ) %>%
+  rename(`Initial Deviation (%)` = Deviation)
+
+
+# --- 2. GENERATE THE THREE PLOTS ---
+
+p_convergence <- ggplot(
+  summary_data,
+  aes(x = `Initial Deviation (%)`, y = `Convergence Rate (%)`, colour = Method)
+) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.3) +
+  scale_colour_manual(values = unname(thesis_palette)) +
+  scale_y_continuous(
+    limits = c(0, 100),
+    breaks = seq(0, 100, 25),
+    labels = scales::label_percent(scale = 1, accuracy = 1)
+  ) +
+  x_scale +
+  labs(y = "Convergence (%)", subtitle = "Convergence Rate") +
+  theme_thesis()
+
+
+p_error <- ggplot(summary_data,
+  aes(`Initial Deviation (%)`, `Mean Error (%)`, colour = Method, group = Method)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.3) +
+  x_scale +
+  scale_y_log10(breaks = c(8, 10, 20, 50), labels = label_number(accuracy = .1)) +
+  scale_colour_manual(values = unname(thesis_palette)) +
+  labs(
+    subtitle = "Mean parameter error",
+    x = NULL,
+    y = "Mean error (%)  [log]"
+  ) +
+  theme_thesis()
+
+p_time <- ggplot(summary_data,
+  aes(`Initial Deviation (%)`, `Mean Time (ms)`, colour = Method, group = Method)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.3) +
+  x_scale +
+  scale_colour_manual(values = unname(thesis_palette)) +
+  labs(
+    subtitle = "Computation time",
+    x = NULL,
+    y = "Time (ms)"
+  ) +
+  theme_thesis()
+
+# ---------- 3. COMBINE WITH PATCHWORK ----------
+figure <- (p_convergence | p_error | p_time) +
+  plot_layout(guides = "collect", widths = c(1, 1, 1)) &
+  theme(
+    legend.position   = "bottom",
+    plot.subtitle     = element_text(face = "bold", hjust = 0.5, size = rel(1)),
+    plot.margin       = margin(5.5, 5.5, 5.5, 5.5)
+  )
+
+figure    # print it
+```
+
+**Convergence (left).**\
+In our benchmark, Newton (i.e., `nlm`, a modified Quasi-Newton method with finite-difference gradients/Hessian and a line search) shows the highest convergence rate across starting-value deviations. That is consistent with curvature-based methods: once we are in a basin, newton contracts quickly. Remember though: *convergence* here just means the solver hit a stationary point, not necessarily the global least-squares minimum.
+
+**Mean parameter error (middle).**\
+Despite strong convergence, Newton’s parameter error surges as the starts get rough. The natural explanation: it often lands in the wrong basin (local minimum or flat saddle), so the solution is far from truth-see the false-minimum discussion in @sec-false-minimum.\
+LM, Gauss-Newton, and PORT look stable on the runs they do solve. Note the selection effect at 100% deviation: LM converges more often, including hard cases, so its *conditional* mean error can be a bit higher simply because it is averaging over tougher fits, while GN/PORT are averaging over only the easy survivors.
+
+**Computation time (right).**\
+LM seems to outperform the other algorithms, but all four methods are in the same ballpark. A true, exact-Hessian Newton (with analytic second derivatives and factorization) would typically be much more expensive per iteration, whereas LM uses $J^\top J + \lambda I$ and keeps per-step costs lower.
+
+**Recommendation.** For moderate initial error and well-behaved models, `GN`, `PORT`, and `LM` perform similarly. As starting values get rougher, `LM` is the safer default—offering high reliability with stable accuracy. `Newton`/`nlm` can often converge, but it is risky under multimodality or strong nonlinearity—“converged” does not guarantee the correct basin—so use it only with good starts and when you expect a single basin.
+
+### Limitations
+
+Several important limitations constrain the generalizability of these findings:
+
+**Model Selection Bias**: The evaluation employs four specific nonlinear models that, while representative of common applications, cannot encompass the full diversity of nonlinear regression problems encountered in practice. Models with discontinuities, constraints, or higher-dimensional parameter spaces may exhibit different performance patterns.
+
+**Synthetic Data Constraints**: All evaluations use simulated data with known true parameters and controlled noise characteristics. Real-world data often contains heteroscedastic errors, outliers, and measurement artifacts not captured in our idealized scenarios.
+
+**Limited Noise Exploration**: The evaluation uses a single noise level across all models. Different signal-to-noise ratios could substantially alter the relative performance of methods, particularly for algorithms sensitive to data quality.
+
+**Starting Value Method Interactions**: The evaluation treats starting value methods and optimization algorithms independently. In practice, certain combinations may exhibit synergistic or antagonistic effects not captured in our separate analyses.
+
+**Grid Search and Domain Knowledge**: Domain Knowledge is highly dependent on literature and prior knowledge. Grid search, on the other hand, can be accurate, but our analysis was restricted to testing only 20 values (ranging from one-third to three times the true parameter value), which limits its precision. Furthermore, this method is computationally expensive and often impractical without sufficient prior knowledge.
+
+**Linearization Applicability**: Not all nonlinear models can be effectively linearized. When available, self-starting functions are preferable as they are both accurate and computationally efficient.
+
+**Optimization Algorithm Constraints**: The use of `nlm()` with the built-in optimizer (a quasi-Newton method) has inherent limitations. Since computing the full Hessian matrix is often infeasible, it is not a full Newton method. These algorithmic constraints represent a key limitation in parameter estimation.

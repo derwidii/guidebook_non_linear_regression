@@ -1,0 +1,313 @@
+# Fundamentals of Nonlinear Regression
+
+This chapter establishes the mathematical foundations for nonlinear regression. These foundations will serve as the theoretical basis for parameter estimation (Chapter 3), model diagnostics (Chapter 4), and statistical inference (Chapter 5).
+
+## Definition and Distinction from Linear Regression
+
+### Linear Versus Nonlinear Models {#sec-linear-versus-nonlinear}
+
+A common misunderstanding is to assume a model is nonlinear simply because its graphical representation is curved. However, the defining characteristic is linearity in the parameters. To make this concrete, @fig-Poly-NLS contrasts a fifth-degree polynomial—curved in $t$ but linear in its coefficients—with a physiologically motivated piecewise exponential model that is truly nonlinear in its parameters.
+
+```{r setup, echo = FALSE, label ="fig-Poly-NLS", fig.cap="Comparison of polynomial (linear in parameters) versus truly nonlinear model for oxygen uptake data"}
+#| label: fig-Poly-NLS
+#| echo: false
+#| fig.cap: "Comparison of a polynomial versus a nonlinear piecewise exponential model"
+#| fig.height: 3
+#| message: false
+#| warning: false
+
+# 1. SETUP: Load libraries and define theme/palette
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(nlstools)
+  library(tidyr)
+})
+
+# Define the custom theme and palette from the previous examples
+theme_thesis <- function(base_size = 12, base_family = "serif") {
+  theme_bw(base_size = base_size, base_family = base_family) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour = "grey92", linewidth = 0.5),
+    panel.border = element_blank(),
+    axis.line = element_line(colour = "black", linewidth = 0.5),
+    axis.ticks = element_line(colour = "black", linewidth = 0.5),
+    legend.position = "bottom",
+    legend.background = element_blank(),
+    legend.key = element_blank(),
+    strip.background = element_rect(fill = "white", colour = "black", linewidth = 0.5)
+  )
+}
+thesis_palette <- c("blue" = "#0072B2", "red" = "#D55E00", "green" = "#009E73")
+
+
+# 2. DATA AND MODEL FITTING (same as original)
+# Load data
+data(O2K, package = "nlstools")
+
+# Fit Polynomial model
+poly_model <- lm(VO2 ~ poly(t, 5, raw = TRUE), data = O2K)
+
+# Define and fit NLS Model
+formulaExp <- as.formula(
+  VO2 ~ (t <= 5.883) * VO2rest +
+        (t > 5.883) * (VO2rest + (VO2peak - VO2rest) * (1 - exp(-(t - 5.883) / mu)))
+)
+nls_fit <- nls(
+  formulaExp,
+  data = O2K,
+  start = list(VO2rest = 400, VO2peak = 1600, mu = 1)
+)
+
+# 3. PREPARE DATA FOR PLOTTING
+# Create a grid for smooth prediction lines
+t_grid <- data.frame(t = seq(min(O2K$t), max(O2K$t), length.out = 200))
+
+# Get predictions from both models
+t_grid$poly_pred <- predict(poly_model, newdata = t_grid)
+t_grid$nls_pred <- predict(nls_fit, newdata = t_grid)
+
+# Reshape data into a tidy, long format for ggplot
+df_preds_long <- pivot_longer(
+  t_grid,
+  cols = c("poly_pred", "nls_pred"),
+  names_to = "model_type",
+  values_to = "vo2_pred"
+)
+
+# 4. CREATE THE PLOT WITH GGPLOT2
+ggplot(O2K, aes(x = t, y = VO2)) +
+  # Observed data points
+  geom_point(shape = 21, size = 2.5, fill = "white", color = "black", stroke = 0.5, alpha = 0.8) +
+  
+  # Fitted model lines
+  geom_line(data = df_preds_long, aes(x = t, y = vo2_pred, color = model_type, linetype = model_type), linewidth = 1) +
+  
+  # Apply the custom theme
+  theme_thesis() +
+  
+  # Define colors and linetypes
+  scale_color_manual(
+    name = "Model Type",
+    values = c("poly_pred" = thesis_palette["blue"], "nls_pred" = thesis_palette["red"]),
+    labels = c("poly_pred" = "5th-Degree Polynomial", "nls_pred" = "Piecewise NLS")
+  ) +
+  scale_linetype_manual(
+    name = "Model Type",
+    values = c("poly_pred" = "dashed", "nls_pred" = "dotted"),
+    labels = c("poly_pred" = "5th-Degree Polynomial", "nls_pred" = "Piecewise NLS")
+  ) +
+  
+  # Add labels
+  labs(
+    x = "Time (minutes)",
+    y = expression("Oxygen Uptake " (VO[2]))
+  )
+```
+
+@fig-Poly-NLS shows that curves fit the shape well, but they differ in interpretability and in how they encode the dynamics. @eq-piecewise-exponential formalizes a mechanistic, piecewise–exponential rise from rest to peak with parameters that map directly to physiology $(\mathrm{VO2}_{\text{rest}}, \mathrm{VO2}_{\text{peak}}, \mu)$. By contrast, @eq-poly-5 gives a flexible fifth-degree polynomial that is linear in its coefficients and lacks direct mechanistic meaning.
+
+
+**Piecewise Exponential Function for Oxygen Uptake.** The oxygen uptake (VO2) during a structured exercise test can be modeled using a piecewise exponential function, as described by @baty_etal_2015 [pp. 6–8]:
+
+$$
+\text{VO2}(t) =
+\begin{cases}
+   \text{VO2}_{\text{rest}}, & \text{if } t \leq 5.883, \\[1ex]
+   \text{VO2}_{\text{rest}} + \bigl(\text{VO2}_{\text{peak}} - \text{VO2}_{\text{rest}}\bigr)
+   \bigl[1 - \exp\!\bigl(-\tfrac{t - 5.883}{\mu}\bigr)\bigr], & \text{if } t > 5.883.
+\end{cases}
+$$ {#eq-piecewise-exponential}
+
+- **Phases.** Rest phase ($t \leq 5.883$ min): VO2 stays at the baseline $\text{VO2}_{\text{rest}}$. Exercise phase ($t > 5.883$ min): VO2 rises exponentially toward $\text{VO2}_{\text{peak}}$ with time constant $\mu$. The value 5.883 min is the exact resting duration.
+
+- **Estimated parameters and interpretation.**
+  - $\text{VO2}_{\text{rest}} = 356.75$ mL/min: baseline oxygen consumption at rest (lower plateau).
+  - $\text{VO2}_{\text{peak}} = 1630.88$ mL/min: maximal uptake during exercise (upper asymptote; fitness indicator).
+  - $\mu = 1.19$ min: time constant of the rise; smaller $\mu$ means a faster response. After one time constant ($t = 5.883 + 1.19 \approx 7.07$ min), VO2 has reached about 63% of the rest–peak difference.
+
+Confidence intervals can be obtained via the methods in @sec-confidence-intervals-theory, and model adequacy assessed with the diagnostics in Chapter 4.
+
+**5th-Degree Polynomial**
+
+While the piecewise exponential function offers parameters with clear physiological meaning, a fifth-degree polynomial can also be fitted to the same oxygen uptake data:
+
+$$
+\text{VO2}(t) = 244.28 + 451.38\, t - 320.9\, t^2 + 75.9\, t^3 - 6.66\, t^4 + 0.2\, t^5
+$$ {#eq-poly-5}
+
+This polynomial provides a mathematical description that may fit the data well statistically (as measured by criteria discussed in @sec-model-comparison-theory), but its coefficients lack direct physiological interpretation. The individual terms ($t$, $t^2$, $t^3$, etc.) and their corresponding coefficients (451.38, -320.9, 75.9, etc.) do not represent meaningful biological parameters, making this model less useful for understanding the underlying physiological processes.
+
+It is important to note that despite the polynomial appearing complex due to its higher-order terms, it is still considered linear in its parameters. The model is a linear combination of basis functions (1, $t$, $t^2$, $t^3$, $t^4$, $t^5$), where each term is multiplied by a coefficient that appears exactly once and is not transformed through any nonlinear function. 
+
+
+### Key Criterion for Nonlinearity
+
+A handy diagnostic to check for nonlinearity in a model is whether the Jacobian $J(\boldsymbol{\beta})=\partial m/\partial\boldsymbol{\beta}$ depends on $\boldsymbol{\beta}$. If $J(\boldsymbol{\beta})$ depends on $\boldsymbol{\beta}$ (under the current parameterization), the model is nonlinear in the parameters. [@obrien_silcox_2024].
+
+#### Example 1: Polynomial of Degree 5
+
+As used in @eq-poly-5 above, a polynomial of degree can look as follows: 
+$$
+f(t) = \beta_0 + \beta_1 t + \beta_2 t^2 + \beta_3 t^3 + \beta_4 t^4 + \beta_5 t^5.
+$$
+
+This model *appears* curved in $t$, but each coefficient $\beta_j$ corresponds to a power of $t$. For instance, the partial derivative of $f$ with respect to $\beta_2$ is:
+
+$$
+\frac{\partial f}{\partial \beta_2} = t^2,
+$$
+
+which does *not* depend on $\beta_2$. Hence, the model is linear in its parameters, allowing for closed-form solutions via ordinary least squares.
+
+#### Example 2: Michaelis-Menten Model
+
+The Michaelis-Menten model is introduced here and analyzed in an extensive case study in @sec-case-study-michaelis.
+
+$$
+f(x) = \frac{V_{\max}\, x}{K_m + x}.
+$$ {#eq-michaelis-menten}
+
+Consider the partial derivative with respect to $K_m$:
+
+$$
+\frac{\partial f}{\partial K_m} = -\frac{V_{\max}\, x}{(K_m + x)^2}.
+$$
+
+Because $K_m$ appears in the denominator, the derivative depends on $K_m$. This indicates that the model is *nonlinear in* $K_m$, necessitating:
+
+-   Iterative optimization methods (@sec-algorithms)
+-   Careful selection of starting values (@sec-case-study-initial-parameters)
+-   Consideration of multiple local minima (@sec-remark-importance)
+
+## Mathematical Fundamentals {#sec-introd-nonlinear-regression}
+
+### General Model Form
+
+A rigorous formulation of a nonlinear regression model is as follows. Suppose we have observations $Y_1, Y_2, \dots, Y_n$ at predictor values $\mathbf{x}_1, \mathbf{x}_2, \dots, \mathbf{x}_n \in \mathbb{R}^m$. Then the model is given by:
+
+$$
+Y_i = m(\mathbf{x}_i; \boldsymbol{\beta}) + \varepsilon_i, \quad i=1,\dots,n,
+$$ {#eq-formal-nonlinear}
+
+with the following components:
+
+-   $\mathbf{x}_i = (x_i^{(1)}, \dots, x_i^{(m)})^\top$ is the vector of $m$ predictor variables.
+-   $\boldsymbol{\beta} = (\beta_1, \beta_2, \dots, \beta_p)^\top$ is an unknown parameter vector, with parameter space $\mathcal{B} \subseteq \mathbb{R}^p$.
+-   $m: \mathbb{R}^m \times \beta \to \mathbb{R}$ is a known function that is continuously differentiable with respect to $\boldsymbol{\beta}$.
+-   $\varepsilon_i$ are independent random errors with $\mathbb{E}[\varepsilon_i] = 0$ and $\operatorname{Var}(\varepsilon_i) = \sigma^2 < \infty$.
+
+The homoscedasticity assumption $\operatorname{Var}(\varepsilon_i) = \sigma^2$ will be relaxed in later chapters:
+
+-   @sec-assessing-variance-structure discusses detection of heteroscedasticity
+-   @sec-box-cox-applied presents Box-Cox transformations for variance stabilization
+-   @sec-robust-confidence-intervals introduces heteroscedasticity-consistent standard errors
+
+### Regularity Conditions {#sec-regularity-conditions}
+
+For the theoretical development of parameter estimation (Chapter 3) and statistical inference (Chapter 5) in subsequent chapters, we require certain regularity conditions. These conditions ensure that our estimation procedures work properly and that we can make valid statistical statements about our parameters [@seber_wild_2003, pp. 565-571]:
+
+1.  **Compact Parameter Space**: The parameter space $\mathcal{B}$ is a closed and bounded (compact) subset of $\mathbb{R}^p$.
+
+2.  **Continuity**: For any $\boldsymbol{\beta}$ in the parameter space $\mathcal{B}$, the model function $m(\mathbf{x}_i; \boldsymbol{\beta})$ is a continuous function of $\boldsymbol{\beta}$.
+
+3.  **Identifiability**: The model must be identifiable. For any two different parameter vectors $\boldsymbol{\beta}_1, \boldsymbol{\beta}_2 \in \beta$, the average squared difference between their predictions, $S_n(\boldsymbol{\beta}_1, \boldsymbol{\beta}_2) = \frac{1}{n} \sum_{i=1}^n [f(\mathbf{x}_i; \boldsymbol{\beta}_1) - f(\mathbf{x}_i; \boldsymbol{\beta}_2)]^2$, must be bounded below by a positive continuous function of $\boldsymbol{\beta}_1$ and $\boldsymbol{\beta}_2$. This ensures a unique minimum for the sum of squares function. Non-identifiability can lead to the convergence issues discussed in @sec-algorithm-perf-main.
+
+4.  **Error Assumptions**: The errors $\varepsilon_i$ are independent and identically distributed (i.i.d.) with mean zero and finite variance $\sigma^2$. Violations can be detected using methods in @sec-initial-diagnostic and addressed with techniques in Chapter 6.
+
+#### Additional Conditions for Asymptotic Normality
+
+To prove that the least-squares estimator is asymptotically normal, further conditions on the derivatives of the model function are needed.
+
+5.  **Interior Point**: The true parameter value, $\boldsymbol{\beta}^*$, is an interior point of the parameter space $\mathcal{B}$. This means $\boldsymbol{\beta}^*$ does not lie on the boundary of $\mathcal{B}$.
+
+6.  **Differentiability**: The first and second derivatives of the model function, $\partial m_i(\boldsymbol{\beta})/\partial \beta_r$ and $\partial^2 m_i(\boldsymbol{\beta})/\partial \beta_r \partial \beta_s$, exist and are continuous for all $\boldsymbol{\beta}$ in an open neighborhood of $\boldsymbol{\beta}^*$.
+
+7.  **Convergence of Information Matrix**: The matrix $\frac{1}{n}\sum_{i=1}^n J_i(\boldsymbol{\beta})^\top J_i(\boldsymbol{\beta}) \to \Omega(\boldsymbol{\beta})$ converges uniformly on a neighborhood of $\boldsymbol{\beta}^*$, and $\Omega(\boldsymbol{\beta}^)$ is nonsingular.
+
+8.  **Boundedness of Second Derivatives**: The term $\frac{1}{n}\sum_{i=1}^n \left[ \frac{\partial^2 m_i(\boldsymbol{\beta})}{\partial \beta_r \partial \beta_s} \right]^2$ converges uniformly on a neighborhood of $\boldsymbol{\beta}^*$. This is a technical condition to control the behavior of the second derivatives.
+
+9.  **Non-singularity**: The limit matrix from condition (7), when evaluated at the true parameter $\boldsymbol{\beta}^*$, must be nonsingular (invertible). That is, $\Omega = \Omega(\boldsymbol{\beta}^*)$ is nonsingular.
+
+{{< pagebreak >}}
+
+These conditions ensure that:
+
+-   Least squares estimators exist and are consistent (@sec-nonlinear-least-square)
+-   Estimators are asymptotically normal, allowing for confidence intervals (@sec-confidence-intervals-theory)
+-   Optimization algorithms have local convergence guarantees (@sec-algorithms)
+
+## Linearization as a Transformation {#sec-linearization-transformation}
+
+Some models that appear nonlinear in their *original* form can be made linear in the parameters through a suitable transformation. As will be seen in @sec-linearization-approach, such transformably linear models have significant advantages when it comes to estimating starting values. The linearization approach provides one of the four main methods for determining initial parameter estimates.
+
+Such functions are sometimes called intrinsically linear response functions [@kutner2004, p. 514]. One classic example is the Cobb–Douglas production function in economics, see also @sec-example-cobb-douglas:
+
+$$
+Y = A\,L^{\alpha}\,K^{\beta},
+$$ {#eq-cobb-douglas}
+
+At first glance, the presence of $L^\alpha$ and $K^\beta$ suggests a model *nonlinear* in the parameters $\alpha$ and $\beta$. However, by taking logarithms on both sides, we obtain a model that is *linear* in the transformed parameters:
+
+$$
+\ln(Y) = \ln(A) + \alpha \ln(L) + \beta \ln(K).
+$$
+
+We can rewrite it as:
+
+$$
+\underbrace{\ln(Y)}_{\text{new response}}
+=
+\underbrace{\ln(A)}_{\text{intercept}}
++
+\underbrace{\alpha}_{\text{parameter}} \,\underbrace{\ln(L)}_{\text{predictor}}
++
+\underbrace{\beta}_{\text{parameter}} \,\underbrace{\ln(K)}_{\text{predictor}}.
+$$
+
+Notice that once the logarithm is applied, $\alpha$ and $\beta$ each multiply a function of $\mathbf{x}=(L,K)$ alone, turning it into a *linear model in* $\ln(A)$, $\alpha$, $\beta$.
+
+### Implication
+
+Because of this linearization, one can estimate $\ln(A)$, $\alpha$, and $\beta$ by ordinary least squares (OLS) if one is prepared to assume *additive errors* on the $\ln(Y)$ scale. However, this transformation changes the error structure—a critical consideration addressed in:
+
+-   @sec-variance-stabilization on variance stabilization
+-   @sec-param-comparison-applied on comparing transformed vs. untransformed models
+-   @sec-robust-confidence-intervals on robust standard errors
+
+Specifically:
+
+$$
+\ln(Y) = \ln(A) + \alpha \ln(L) + \beta \ln(K) + \varepsilon',
+$$
+
+where $\varepsilon'$ represents the error term in the transformed model.
+
+## Multiplicative Errors and Transformations {#sec-multiplicative-errors}
+
+While linearizing transformations simplify parameter estimation, they fundamentally alter the error structure [@seber_wild_2003, p. 15]. This section explores when transformations are appropriate and their implications for inference.
+
+The classical motivation for applying a log transform is that it can handle multiplicative errors in the original scale [@bates_watts_1988, p. 25]. Specifically, one might posit a model:
+
+
+$$
+Y_i = h(\mathbf{x}_i;\,\boldsymbol{\beta}) \,\varepsilon_i^*,
+\quad\text{where}\quad
+\mathbb{E}[\varepsilon_i^*] = 1.
+$$
+
+If $\varepsilon_i^*$ is log-normally distributed, taking logs yields:
+
+$$
+\ln(Y_i)
+=
+\ln\!\bigl(h(\mathbf{x}_i;\,\boldsymbol{\beta})\bigr)
++
+\ln(\varepsilon_i^*),
+$$
+
+thus transforming a multiplicative error structure into an additive form on the log scale. The appropriateness of this transformation can be assessed using:
+
+-   Residual plots: @sec-initial-diagnostic
+-   Box-Cox analysis: @sec-box-cox-applied
+-   Formal tests for heteroscedasticity: @sec-res-diagnostic-test-applied

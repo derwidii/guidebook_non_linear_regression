@@ -1,0 +1,498 @@
+---
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+# Gradient Derivation {#sec-appendix-gradient-derivation}
+
+This appendix provides the detailed component-wise derivation of the
+gradient of the RSS.
+
+The gradient is given by:
+
+$$\nabla_{\boldsymbol{\beta}} \text{RSS}(\boldsymbol{\beta}) = \left(\frac{\partial \text{RSS}(\boldsymbol{\beta})}{\partial \beta_1}, \frac{\partial \text{RSS}(\boldsymbol{\beta})}{\partial \beta_2}, \ldots, \frac{\partial \text{RSS}(\boldsymbol{\beta})}{\partial \beta_p}\right)^T$$
+
+For each component $j = 1, 2, \ldots, p$, we have:
+
+$$
+\begin{aligned}
+\frac{\partial \text{RSS}(\boldsymbol{\beta})}{\partial \beta_j} &= \frac{\partial}{\partial \beta_j} \sum_{i=1}^{n} [y_i - f(x_i; \boldsymbol{\beta})]^2 \\
+&= \sum_{i=1}^{n} \frac{\partial}{\partial \beta_j} [y_i - f(x_i; \boldsymbol{\beta})]^2 \\
+&= \sum_{i=1}^{n} 2[y_i - f(x_i; \boldsymbol{\beta})] \cdot \left(-\frac{\partial f(x_i; \boldsymbol{\beta})}{\partial \beta_j}\right) \\
+&= -2\sum_{i=1}^{n} r_i(\boldsymbol{\beta}) \frac{\partial f(x_i; \boldsymbol{\beta})}{\partial \beta_j}
+\end{aligned}
+$$
+
+Setting each component to zero yields the system of equations:
+
+$$\sum_{i=1}^{n} r_i(\boldsymbol{\beta}) \frac{\partial f(x_i; \boldsymbol{\beta})}{\partial \beta_j} = 0, \quad j = 1, 2, \ldots, p$$
+
+# Michaelis-Menten Analytical Intractability {#sec-appendix-mm-example}
+
+To illustrate why the normal equations cannot typically be solved
+analytically, consider the Michaelis-Menten model:
+
+$$f(x; \boldsymbol{\beta}) = \frac{V_{max} \cdot x}{K_m + x}$$
+
+where $x$ represents the substrate concentration, and
+$\boldsymbol{\beta} = (V_{max}, K_m)^T$ are the parameters to be
+estimated: $V_{max}$ is the maximum reaction rate, and $K_m$ is the
+Michaelis constant.
+
+For a dataset $\{(x_i, y_i)\}_{i=1}^n$, the residuals are:
+
+$$r_i(\boldsymbol{\beta}) = y_i - \frac{V_{max} \cdot x_i}{K_m + x_i}$$
+
+To find the parameter estimates, we need to solve the normal equations.
+First, we compute the partial derivatives:
+
+$$\frac{\partial f(x_i; \boldsymbol{\beta})}{\partial V_{max}} = \frac{x_i}{K_m + x_i}$$
+
+$$\frac{\partial f(x_i; \boldsymbol{\beta})}{\partial K_m} = -\frac{V_{max} \cdot x_i}{(K_m + x_i)^2}$$
+
+Substituting these into the normal equations:
+
+$$\sum_{i=1}^{n} \left(y_i - \frac{V_{max} \cdot x_i}{K_m + x_i}\right) \cdot \frac{x_i}{K_m + x_i} = 0$$
+
+$$\sum_{i=1}^{n} \left(y_i - \frac{V_{max} \cdot x_i}{K_m + x_i}\right) \cdot \left(-\frac{V_{max} \cdot x_i}{(K_m + x_i)^2}\right) = 0$$
+
+Attempting to solve these equations analytically leads to a system of
+equations with no closed-form solution. The denominators contain the
+parameters in a nonlinear fashion ($(K_m + x_i)$ and $(K_m + x_i)^2$),
+making it impossible to isolate $V_{max}$ and $K_m$ algebraically.
+Furthermore, the summation over all data points compounds this
+complexity.
+
+This relatively simple two-parameter model already presents an
+intractable analytical problem. For more complex nonlinear models with
+additional parameters or more intricate functional forms, the normal
+equations become even more resistant to analytical solutions.
+
+# The Taylor Series Expansion {#sec-taylor-series-expansion}
+
+Starting with an initial parameter estimate $\boldsymbol{\beta}^{(0)}$,
+we linearize the residuals around the current estimate using a Taylor
+series expansion. Let us denote our current parameter estimate at
+iteration $k$ as $\boldsymbol{\beta}^{(k)}$ and the parameter update we
+seek as $\Delta\boldsymbol{\beta}$.
+
+The Taylor series expansion of the residual vector around the current
+estimate is, adapted from @seber_wild_2003 [p. 25]:
+
+$$
+\mathbf{r}(\boldsymbol{\beta}^{(k)} + \Delta\boldsymbol{\beta}) = \mathbf{r}(\boldsymbol{\beta}^{(k)}) + \mathbf{J}(\boldsymbol{\beta}^{(k)})\Delta\boldsymbol{\beta} + \frac{1}{2} \left( \Delta\boldsymbol{\beta}^T \mathbf{H}_i(\boldsymbol{\beta}^{(k)}) \Delta\boldsymbol{\beta} \right)_{i=1}^n + O(\|\Delta\boldsymbol{\beta}\|^3)
+$$
+
+where:
+
+-   The first term $\mathbf{r}(\boldsymbol{\beta}^{(k)})$ is the vector
+    of residuals at the current parameter values
+-   The second term
+    $\mathbf{J}(\boldsymbol{\beta}^{(k)})\Delta\boldsymbol{\beta}$
+    represents the linear approximation, where
+    $\mathbf{J}(\boldsymbol{\beta}^{(k)})$ is the Jacobian matrix
+    defined in @eq-jacobian
+-   The third term
+    $\frac{1}{2} \left( \Delta\boldsymbol{\beta}^T \mathbf{H}_i(\boldsymbol{\beta}^{(k)}) \Delta\boldsymbol{\beta} \right)_{i=1}^n$
+    captures the quadratic behavior, with
+    $\mathbf{H}_i(\boldsymbol{\beta}^{(k)}) = \nabla^2 r_i(\boldsymbol{\beta}^{(k)})$
+    denoting the Hessian matrix of the $i$-th residual
+-   $O(\|\Delta\boldsymbol{\beta}\|^3)$ denotes higher-order terms that
+    become negligible for small $\Delta\boldsymbol{\beta}$
+
+## Approximation and Linearized Least Squares
+
+The Taylor series expansion can be truncated at different orders
+depending on the desired level of approximation. If we consider only the
+linear terms (first-order approximation), we get [@seber_wild_2003, p.
+25]
+
+$$\mathbf{r}(\boldsymbol{\beta}^{(k)} + \Delta\boldsymbol{\beta}) \approx \mathbf{r}(\boldsymbol{\beta}^{(k)}) + \mathbf{J}(\boldsymbol{\beta}^{(k)})\Delta\boldsymbol{\beta})$$
+
+This linearization transforms our nonlinear problem into a linear
+approximation. Instead of minimizing the original sum of squared
+residuals, we now aim to minimize the sum of squared linearized
+residuals:
+
+$$\min_{\Delta\boldsymbol{\beta}} \|\mathbf{r}(\boldsymbol{\beta}^{(k)}) + \mathbf{J}(\boldsymbol{\beta}^{(k)})\Delta\boldsymbol{\beta}\|^2$$
+
+This is a linear least squares problem in $\Delta\boldsymbol{\beta}$.
+Applying the necessary conditions for minimization yields the linearized
+normal equations:
+
+$$\mathbf{J}(\boldsymbol{\beta}^{(k)})^T\mathbf{J}(\boldsymbol{\beta}^{(k)})\Delta\boldsymbol{\beta} = -\mathbf{J}(\boldsymbol{\beta}^{(k)})^T\mathbf{r}(\boldsymbol{\beta}^{(k)})$$ {#eq-linearized-normal}
+
+Unlike the original nonlinear normal equations, this linear system can
+be solved directly for $\Delta\boldsymbol{\beta}$ (assuming the matrix
+$\mathbf{J}(\boldsymbol{\beta}^{(k)})^T\mathbf{J}(\boldsymbol{\beta}^{(k)})$
+is invertible).
+
+```{r}
+#| label: fig-taylor
+#| echo: false
+#| fig-cap: "Taylor series expansions of a smooth function $f(b)$."
+#| fig-width: 6
+#| fig-height: 4
+#| warning: false
+
+library(ggplot2)
+
+# f derivatives
+f  <- function(b) sin(b) + 0.5*(b - 3)^2
+f1 <- function(b) cos(b) +       (b - 3)
+f2 <- function(b) -sin(b) + 1   
+
+# expand around 3
+b0 <- 3
+
+# plotting
+b <- seq(0, 6, length.out = 300)
+
+# 4. Build data frame in "long" form
+df <- data.frame(
+  b = rep(b, 4),
+  y = c(
+    f(b),                             # true
+    rep(f(b0), length(b)),           # 0th order
+    f(b0) + f1(b0)*(b - b0),         # 1st order
+    f(b0) + f1(b0)*(b - b0) +         # 2nd order
+      f2(b0)/2*(b - b0)^2
+  ),
+  order = factor(
+    rep(c("True $f(b)$",
+          "0th order",
+          "1st order",
+          "2nd order"),
+        each = length(b)),
+    levels = c("True $f(b)$","0th order","1st order","2nd order")
+  )
+)
+
+# 5. Plot
+ggplot(df, aes(b, y, linetype = order)) +
+  geom_line(size = 1) +
+  scale_linetype_manual(
+    values = c("solid", "dotted", "dashed", "dotdash")
+  ) +
+  geom_vline(xintercept = b0, linetype = "dotted") +
+  theme_classic(base_family = "serif", base_size = 12) +
+  labs(
+    x       = expression(b),
+    y       = expression(f(b)),
+    linetype = NULL
+  ) +
+  annotate(
+    "text",
+    x = b0, y = f(b0) + 0.5,
+    label = expression(b[0] == 3),
+    parse = TRUE,
+    hjust = 1.1
+  )
+```
+
+# Hessian of the Objective Function {#sec-appendix-hessian-derivation}
+
+This appendix provides the complete derivation of the Hessian matrix for
+the least squares objective function.
+
+While the Hessian structure relates to individual residuals, we often
+need the Hessian of the objective function (the sum of squared
+residuals) itself. If we denote the objective function as:
+
+$$f(\boldsymbol{\beta}) = \frac{1}{2}\sum_{i=1}^{n}r_i^2(\boldsymbol{\beta})$$
+
+Then the Hessian matrix of this function is:
+
+$$H_{jk}(\boldsymbol{\beta}) = \frac{\partial^2 f(\boldsymbol{\beta})}{\partial \beta_j \partial \beta_k} = \sum_{i=1}^{n}\left[\frac{\partial r_i(\boldsymbol{\beta})}{\partial \beta_j}\frac{\partial r_i(\boldsymbol{\beta})}{\partial \beta_k} + r_i(\boldsymbol{\beta})\frac{\partial^2 r_i(\boldsymbol{\beta})}{\partial \beta_j \partial \beta_k}\right]$$
+
+This can be expressed in matrix form as:
+
+$$\mathbf{H}_f(\boldsymbol{\beta}) = \mathbf{J}(\boldsymbol{\beta})^T\mathbf{J}(\boldsymbol{\beta}) + \sum_{i=1}^{n}r_i(\boldsymbol{\beta})\mathbf{H}_i(\boldsymbol{\beta})$$ {#eq-hessian-objective}
+
+This formula reveals that the Hessian of the objective function has two
+components: 1. The first term,
+$\mathbf{J}(\boldsymbol{\beta})^T\mathbf{J}(\boldsymbol{\beta})$,
+depends only on first derivatives 2. The second term weights the Hessian
+of each residual by the residual value itself
+
+# Newton's Method {#sec-newton-method}
+
+## Theoretical Foundation
+
+Newton's method applies the principles of Newton-Raphson optimization to
+the nonlinear least squares problem [@seber_wild_2003, pp. 26, 34-35;
+@bates_watts_1988, pp. 79-80] Following our linearization approach, we
+seek to minimize the sum of squared residuals:
+
+$$f(\boldsymbol{\beta}) = \frac{1}{2}\sum_{i=1}^{n}r_i^2(\boldsymbol{\beta}) = \frac{1}{2}\mathbf{r}(\boldsymbol{\beta})^T\mathbf{r}(\boldsymbol{\beta})$$
+
+Newton's method approximates this objective function around the current
+parameter estimate $\boldsymbol{\beta}^{(k)}$ using a second-order
+Taylor series expansion. To find the minimum of this quadratic
+approximation, we set its derivative with respect to
+$\Delta\boldsymbol{\beta}$ to zero, yielding the Newton update:
+
+$$\Delta\boldsymbol{\beta} = -\mathbf{H}(\boldsymbol{\beta}^{(k)})^{-1}\mathbf{g}(\boldsymbol{\beta}^{(k)})$$ {#eq-newton-update}
+
+where
+$\mathbf{g}(\boldsymbol{\beta}^{(k)}) = \nabla f(\boldsymbol{\beta}^{(k)}) = \mathbf{J}(\boldsymbol{\beta}^{(k)})^T\mathbf{r}(\boldsymbol{\beta}^{(k)})$
+is the gradient vector and $\mathbf{H}(\boldsymbol{\beta}^{(k)})$ is the
+Hessian matrix.
+
+## Advantages and Limitations
+
+**Advantages:**
+
+1.  **Accurate approximation**: The second-order approximation provides
+    a more accurate local representation of the objective function than
+    first-order methods.
+
+2.  **Scale invariance**: The method's performance is invariant to
+    linear transformations of the parameter space, making it robust to
+    different parameterizations.
+
+**Limitations:**
+
+1.  **Computational cost**: Computing the full Hessian matrix requires
+    calculating second derivatives, which can be computationally
+    expensive or analytically intractable for complex models.
+
+2.  **Storage requirements**: For problems with many parameters, storing
+    and inverting the Hessian matrix becomes memory-intensive.
+
+3.  **Non-positive definiteness**: Far from the solution, the Hessian
+    might not be positive definite, potentially leading to updates that
+    increase rather than decrease the objective function.
+
+4.  **Sensitivity to starting values**: The method may diverge if the
+    initial values are far from the solution.
+
+# Port (Constrained NLS) {#sec-port-algorithm}
+
+## Theoretical Foundation
+
+Developed by Dennis, Gay, and Welsch in 1981 at Bell Laboratories, the
+PORT algorithm embeds core nonlinear least squares methods within a
+constrained optimization framework [@dennis1981]. The algorithm solves
+problems of the form:
+
+$$\min_{\boldsymbol{\beta}} \frac{1}{2}\sum_{i=1}^{n}r_i^2(\boldsymbol{\beta})$$
+
+subject to constraints:
+
+$$l_j \leq \beta_j \leq u_j, \quad j = 1, 2, \ldots, p$$ {#eq-port-constraints}
+
+where $l_j$ and $u_j$ represent lower and upper bounds on each
+parameter, respectively.
+
+The Port algorithm employs several complementary strategies to handle
+constraints effectively, as stated by [@dennis1981]:
+
+1.  **Hybrid Quasi-Newton Method:** The algorithm utilizes a variation
+    of Newton's method. It functions by computing part of the Hessian
+    matrix exactly while approximating the other part with a secant
+    (quasi-Newton) updating method.
+
+2.  **Model/Trust-Region Technique:** To ensure reliable convergence,
+    especially from poor starting points, it uses a model/trust-region
+    technique.
+
+3.  **Adaptive Model Selection:** The algorithm makes an adaptive choice
+    of the model Hessian. This flexibility allows it to operate as a
+    Gauss-Newton or Levenberg-Marquardt method depending on the
+    problem's characteristics. This is particularly useful for large
+    residual problems where NL2SOL often performs much better than those
+    methods.
+
+## Advantages and Limitations
+
+**Advantages:**
+
+1.  **Ensures physically meaningful results**: Parameters stay within
+    bounds that make sense for your application.
+
+2.  **Improves stability**: Constraining parameters can prevent the
+    algorithm from exploring problematic regions.
+
+3.  **Incorporates scientific knowledge**: Allows you to embed domain
+    expertise into the estimation process.
+
+4.  **Can improve convergence**: Well-chosen constraints sometimes help
+    the algorithm find solutions more reliably.
+
+**Limitations:**
+
+1.  **More complex calculations**: Adding constraint handling increases
+    computational requirements.
+
+2.  **Starting values must be feasible**: Initial parameter guesses must
+    satisfy all constraints.
+
+3.  **Boundary solutions require care**: When parameters end up exactly
+    at their bounds, standard statistical inference may need adjustment.
+
+# Partially Linear (P-Linear) Approach {#sec-p-linear}
+
+## Theoretical Foundation
+
+Many nonlinear regression models exhibit a special structure where some
+parameters appear linearly in the model while others appear nonlinearly.
+The partially linear (P-linear) approach, implemented through the
+Golub-Pereyra algorithm, takes advantage of this structure to improve
+computational efficiency and numerical stability in parameter estimation
+[@ritz_streibig_2008, pp. 41-43; @bates_watts_1988, p. 85; @golub1973].
+
+Consider a nonlinear regression model of the form:
+
+$$f(x; \boldsymbol{\beta}, \boldsymbol{\phi}) = \sum_{j=1}^{q} \beta_j g_j(x; \boldsymbol{\phi})$$ {#eq-plinear-model}
+
+where:
+
+-   $\boldsymbol{\beta} = (\beta_1, \beta_2, \ldots, \beta_q)^T$ are the
+    linear parameters
+-   $\boldsymbol{\phi} = (\phi_1, \phi_2, \ldots, \phi_r)^T$ are the
+    nonlinear parameters
+-   $g_j(x; \boldsymbol{\phi})$ are nonlinear functions that depend on
+    the nonlinear parameters $\boldsymbol{\phi}$ but not on the linear
+    parameters $\boldsymbol{\beta}$
+
+The key insight of the P-linear approach is that if the nonlinear
+parameters $\boldsymbol{\phi}$ were fixed, the model would become linear
+in the remaining parameters $\boldsymbol{\beta}$, allowing for an
+analytical solution for these linear parameters using standard linear
+regression techniques.
+
+The P-linear algorithm proceeds iteratively by, see practical
+implementation in @ritz_streibig_2008 [p. 42]:
+
+1.  **For fixed nonlinear parameters** $\boldsymbol{\phi}$: Solve for
+    the optimal linear parameters analytically:
+    $$\hat{\boldsymbol{\beta}}(\boldsymbol{\phi}) = (\mathbf{Z}(\boldsymbol{\phi})^T\mathbf{Z}(\boldsymbol{\phi}))^{-1}\mathbf{Z}(\boldsymbol{\phi})^T\mathbf{y}$$
+
+2.  **Substitute back** to obtain the reduced RSS:
+    $$\text{RSS}(\boldsymbol{\phi}) = \|\mathbf{y} - \mathbf{Z}(\boldsymbol{\phi})\hat{\boldsymbol{\beta}}(\boldsymbol{\phi})\|^2$$
+
+3.  **Optimize with respect to nonlinear parameters only** using methods
+    like Gauss-Newton or Levenberg-Marquardt.
+
+4.  **Iterate until convergence**.
+
+This approach can be interpreted as a variable projection method, where
+the linear parameters are "projected out" of the optimization problem,
+leaving only the nonlinear parameters to be estimated iteratively.
+
+## Advantages and Limitations
+
+**Advantages:**
+
+1.  **Reduced dimensionality**: By analytically solving for the linear
+    parameters, the algorithm only needs to iterate over the nonlinear
+    parameters, significantly reducing the computational complexity.
+
+2.  **Improved stability**: The separation of linear and nonlinear
+    parameters often leads to better-conditioned optimization problems
+    and more stable convergence.
+
+3.  **Faster convergence**: The analytical solution for linear
+    parameters accelerates convergence compared to treating all
+    parameters as nonlinear.
+
+4.  **Parameter identifiability**: The approach can help address
+    identifiability issues that might arise when all parameters are
+    treated equally.
+
+**Limitations:**
+
+1.  **Restricted model form**: Only applicable to models with the
+    specific partially linear structure.
+
+2.  **Computational overhead**: Computing the analytical solution for
+    linear parameters at each iteration introduces some computational
+    overhead.
+
+3.  **Numerical stability concerns**: In some cases, the computation of
+    $(\mathbf{Z}(\boldsymbol{\phi})^T\mathbf{Z}(\boldsymbol{\phi}))^{-1}$
+    may be ill-conditioned.
+
+4.  **Implementation complexity**: Requires more sophisticated
+    implementation than treating all parameters as nonlinear.
+
+# Levenberg–Marquardt Damping Strategy {#sec-appendix-lm-damping}
+
+We minimize
+$f(\boldsymbol\beta)=\tfrac12\|\mathbf r(\boldsymbol\beta)\|^2$ with
+gradient $\mathbf g=\nabla f=\mathbf J^\top\mathbf r$, where
+$\mathbf J=\partial\mathbf r/\partial\boldsymbol\beta$.
+
+**Damped normal equations.** Given $\lambda\ge 0$ and a diagonal scaling
+$\mathbf D$ (e.g.,
+$\mathbf D=\operatorname{diag}(\sqrt{\operatorname{diag}(\mathbf J^\top\mathbf J)})$),
+the LM step $\Delta\boldsymbol\beta$ solves [@nocedal2006, p. 258] $$
+\big(\mathbf J^\top\mathbf J+\lambda\,\mathbf D^\top\mathbf D\big)\,\Delta\boldsymbol\beta = -\,\mathbf J^\top\mathbf r.
+$$
+
+**Actual vs. predicted reduction.** With the Gauss–Newton quadratic
+model $$
+m(\Delta)=f+\mathbf g^\top\Delta+\tfrac12\,\Delta^\top(\mathbf J^\top\mathbf J)\,\Delta,
+$$ the predicted decrease is $$
+\text{predicted\_reduction} \;=\; -\,\mathbf g^\top \Delta \;-\; \tfrac12\,\Delta^\top(\mathbf J^\top\mathbf J)\,\Delta.
+$$ (Equivalently, using the normal–equation identity
+$-\,\mathbf g^\top\Delta=\Delta^\top(\mathbf J^\top\mathbf J)\Delta+\lambda\,\Delta^\top\mathbf D^\top\mathbf D\,\Delta$,
+one can compute it as
+$\tfrac12\,\Delta^\top(\mathbf J^\top\mathbf J)\Delta + \lambda\,\Delta^\top\mathbf D^\top\mathbf D\,\Delta$
+
+Define the gain ratio $$
+\rho \;=\; \frac{f(\boldsymbol\beta)-f(\boldsymbol\beta+\Delta)}{\text{predicted\_reduction}}.
+$$
+
+**Update rule (simple, effective).** - If $\rho > \eta$ (e.g.,
+$\eta=10^{-3}$): accept
+$\boldsymbol\beta\leftarrow\boldsymbol\beta+\Delta$ and decrease damping
+(e.g., $\lambda\leftarrow \lambda/10$). - Else: reject the step and
+increase damping (e.g., $\lambda\leftarrow 10\,\lambda$).
+
+**Notes.** - $\lambda\!\to\!0$ recovers Gauss–Newton; large $\lambda$
+approaches scaled gradient descent. - Using $\mathbf D=\mathbf I$ is
+simpler but the Marquardt scaling above is often more robust.
+
+# Empirical Verification of NLS-MLE Equivalence {#sec-appendix-nls-mle-comparison}
+
+Below we simulate some data in R to illustrate that the NLS and MLE
+estimates indeed coincide under Gaussian errors:
+
+```{r, warning = FALSE}
+set.seed(2025)
+n <- 100
+x <- seq(0, 5, length.out = n)
+A_true <- 2; B_true <- 0.5; sigma_true <- 1
+y <- A_true * exp(B_true * x) + rnorm(n, 0, sigma_true)
+
+# least squares
+nls_fit <- nls(y ~ A * exp(B * x), start = list(A = 1, B = 0.2))
+coef_nls <- coef(nls_fit)
+
+# maximum likelihood
+loglik <- function(par) {
+  A <- par[1]; B <- par[2]
+  mu <- A * exp(B * x)
+  -sum(dnorm(y, mean = mu, sd = sigma_true, log = TRUE))
+}
+mle_par <- optim(par = c(A = 1, B = 0.2), fn = loglik)$par
+
+library(knitr)
+results <- data.frame(
+  Method = c("Nonlinear LS", "MLE"),
+  A      = c(coef_nls["A"], mle_par["A"]),
+  B      = c(coef_nls["B"], mle_par["B"])
+)
+
+kable(
+  results,
+  caption = "Comparison of Parameter Estimates: Nonlinear Least Squares vs. MLE"
+)
+```
+
+As expected under Gaussian errors, the parameter estimates obtained via
+nonlinear least squares and maximum likelihood estimation are nearly
+identical, confirming their theoretical equivalence in this setting.
